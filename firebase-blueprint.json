@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile containing authentication and role-based permissions",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 150 },
+        "username": { "type": "string", "maxLength": 60 },
+        "email": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin", "supervisor", "seller"] },
+        "supervisorId": { "type": "string", "maxLength": 128 },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "fullName", "email", "role", "active"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Registered commercial client with Dominican identification, address and GPS georeference",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 150 },
+        "cedula": { "type": "string", "maxLength": 20 },
+        "cedulaFront": { "type": "string", "maxLength": 2000000 },
+        "cedulaBack": { "type": "string", "maxLength": 2000000 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "secondaryPhone": { "type": "string", "maxLength": 30 },
+        "sector": { "type": "string", "maxLength": 100 },
+        "street": { "type": "string", "maxLength": 150 },
+        "localNumber": { "type": "string", "maxLength": 50 },
+        "additionalAddress": { "type": "string", "maxLength": 250 },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "accuracy": { "type": "number" },
+        "capturedAt": { "type": "string", "maxLength": 50 },
+        "sellerId": { "type": "string", "maxLength": 128 },
+        "sellerName": { "type": "string", "maxLength": 150 },
+        "supervisorId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "syncStatus": { "type": "string", "enum": ["synced", "pending", "syncing"] },
+        "deletedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["clientId", "fullName", "cedula", "phone", "sector", "street", "localNumber", "sellerId", "sellerName"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Audit trails recording customer creations, edits and deletions",
+      "type": "object",
+      "properties": {
+        "logId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 120 },
+        "clientId": { "type": "string", "maxLength": 128 },
+        "action": { "type": "string", "maxLength": 50 },
+        "changes": { "type": "string", "maxLength": 1000 },
+        "timestamp": { "type": "string" },
+        "device": { "type": "string", "maxLength": 150 }
+      },
+      "required": ["logId", "userId", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of user accounts and permissions"
+    },
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Collection of commercial clients registered by sellers"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Immutable log entries of administrative and commercial actions"
+    }
+  }
+}

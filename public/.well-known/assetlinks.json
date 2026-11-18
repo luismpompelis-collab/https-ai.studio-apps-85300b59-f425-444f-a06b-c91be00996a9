@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.clientespro.app",
+      "sha256_cert_fingerprints": [
+        "14:6D:E9:7D:0F:B1:68:E8:9E:8A:7A:86:86:14:2D:40:99:A7:2F:A1:23:07:85:31:A5:DB:E5:4F:33:FF:EA:A1"
+      ]
+    }
+  }
+]

@@ -1,0 +1,6 @@
+{
+  "name": "CLIENTES PRO – Gestión Comercial",
+  "description": "Sistema empresarial de registro y gestión de clientes con sincronización offline, captura GPS, escaneo de cédula y panel de control.",
+  "requestFramePermissions": ["geolocation", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
