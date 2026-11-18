@@ -214,7 +214,7 @@ export const ClientMapView: React.FC<ClientMapViewProps> = ({ onSelectClient }) 
   const zIndexSelected = geocodedClients.length + 10;
   const zIndexHover = geocodedClients.length + 5;
 
-  const cleanPhone = selectedClient ? selectedClient.phone.replace(/\D/g, '') : '';
+  const cleanPhone = selectedClient ? (selectedClient.phone || '').replace(/\D/g, '') : '';
   const whatsAppUrl = selectedClient
     ? `https://wa.me/1${cleanPhone}?text=${encodeURIComponent(
         `Hola ${selectedClient.fullName}, le contactamos de CLIENTES PRO.`

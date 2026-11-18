@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Map as GoogleMap,
   AdvancedMarker,
@@ -63,12 +63,19 @@ export const ClientDossierModal: React.FC<ClientDossierModalProps> = ({
   const [copiedGps, setCopiedGps] = useState(false);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   // New enhancements
   const [stage, setStage] = useState<ClientStage>(client?.stage || 'prospecto');
   const [notes, setNotes] = useState<ClientNote[]>(client?.notes || []);
   const [newNoteText, setNewNoteText] = useState('');
   const [showWhatsAppTemplates, setShowWhatsAppTemplates] = useState(false);
+
+  useEffect(() => {
+    setStage(client?.stage || 'prospecto');
+    setNotes(client?.notes || []);
+    setConfirmingDelete(false);
+  }, [client?.clientId, client?.stage, client?.notes]);
 
   if (!client) return null;
 
@@ -149,12 +156,10 @@ Estado de Sincronización: ${client.syncStatus.toUpperCase()}
 
   // Soft delete client
   const handleDelete = async () => {
-    if (!window.confirm(`¿Estás seguro de mover el expediente de "${client.fullName}" a la papelera?`)) {
-      return;
-    }
     setIsDeleting(true);
     try {
       await removeClientLocallyAndRemote(client.clientId);
+      setConfirmingDelete(false);
       onClose();
     } catch (e) {
       console.error('Delete error:', e);
@@ -164,10 +169,16 @@ Estado de Sincronización: ${client.syncStatus.toUpperCase()}
   };
 
   // WhatsApp quick messages
-  const cleanPhone = client.phone.replace(/\D/g, '');
+  const cleanPhone = (client.phone || '').replace(/\D/g, '');
   const sendWhatsApp = (msg: string) => {
     const url = `https://wa.me/1${cleanPhone}?text=${encodeURIComponent(msg)}`;
-    window.open(url, '_blank');
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     setShowWhatsAppTemplates(false);
   };
 
@@ -605,14 +616,34 @@ Estado de Sincronización: ${client.syncStatus.toUpperCase()}
             )}
 
             {canDelete && (
-              <button
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="px-3 py-2 rounded-lg bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white text-xs font-bold transition flex items-center gap-1.5 border border-red-500/30"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                ELIMINAR
-              </button>
+              confirmingDelete ? (
+                <div className="flex items-center gap-1.5 bg-red-950/60 border border-red-800 rounded-lg px-2 py-1">
+                  <span className="text-[11px] font-bold text-red-200">¿Eliminar?</span>
+                  <button
+                    onClick={handleDelete}
+                    disabled={isDeleting}
+                    className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-[11px] font-bold transition"
+                  >
+                    {isDeleting ? 'Borrando...' : 'Sí, mover a papelera'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmingDelete(false)}
+                    disabled={isDeleting}
+                    className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition"
+                  >
+                    No
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmingDelete(true)}
+                  disabled={isDeleting}
+                  className="px-3 py-2 rounded-lg bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white text-xs font-bold transition flex items-center gap-1.5 border border-red-500/30"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  ELIMINAR
+                </button>
+              )
             )}
           </div>
         </div>

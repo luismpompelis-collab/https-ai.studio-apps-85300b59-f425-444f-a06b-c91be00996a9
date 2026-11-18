@@ -5,7 +5,7 @@ import { usePresence } from '../context/PresenceContext';
 import { isPresenceActive } from '../lib/presence';
 import { UserProfile, UserRole } from '../types';
 import { collection, doc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, stripUndefined } from '../lib/firebase';
 import { recordAuditLog } from '../lib/audit';
 import {
   Shield,
@@ -20,8 +20,10 @@ import {
 } from 'lucide-react';
 import { formatDominicanDateTime } from '../lib/dominicanValidation';
 
+const LOCAL_USERS_KEY = 'clientes_pro_local_users';
+
 export const SellerManagement: React.FC = () => {
-  const { userProfile } = useAuth();
+  const { currentUser, userProfile } = useAuth();
   const { allClients } = useSync();
   const {
     connectedSupervisors,
@@ -46,23 +48,42 @@ export const SellerManagement: React.FC = () => {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [confirmToggleUid, setConfirmToggleUid] = useState<string | null>(null);
 
-  // Fetch users from Firestore
+  const loadLocalUsers = (): UserProfile[] => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || '[]') as UserProfile[];
+      if (userProfile && !saved.some((u) => u.uid === userProfile.uid)) {
+        return [userProfile, ...saved];
+      }
+      return saved.length > 0 ? saved : userProfile ? [userProfile] : [];
+    } catch {
+      return userProfile ? [userProfile] : [];
+    }
+  };
+
+  // Fetch users from Firestore (when authenticated) or local cache
   const fetchUsers = async () => {
     setLoading(true);
     try {
+      if (!currentUser) {
+        const local = loadLocalUsers();
+        setUsersList(local);
+        return;
+      }
+
       const snap = await getDocs(collection(db, 'users'));
       const list: UserProfile[] = [];
       snap.forEach((d) => list.push(d.data() as UserProfile));
 
-      // If empty or initial, include default admin
       if (list.length === 0 && userProfile) {
         list.push(userProfile);
       }
       setUsersList(list);
     } catch (err) {
       console.warn('Error fetching users, using local view:', err);
-      if (userProfile) setUsersList([userProfile]);
+      setUsersList(loadLocalUsers());
     } finally {
       setLoading(false);
     }
@@ -70,7 +91,7 @@ export const SellerManagement: React.FC = () => {
 
   useEffect(() => {
     fetchUsers();
-  }, [userProfile]);
+  }, [currentUser, userProfile]);
 
   // Supervisors available for assignment
   const supervisors = usersList.filter((u) => u.role === 'supervisor' || u.role === 'admin');
@@ -99,16 +120,23 @@ export const SellerManagement: React.FC = () => {
     setIsSubmitting(true);
     try {
       if (editingUser) {
-        // Update user profile in Firestore
-        const userRef = doc(db, 'users', editingUser.uid);
-        const updatedData = {
+        const updatedFields = stripUndefined({
           fullName: fullName.trim(),
           username: username.trim().toLowerCase(),
           role,
           supervisorId: supervisorId || null,
           updatedAt: new Date().toISOString()
-        };
-        await updateDoc(userRef, updatedData);
+        });
+
+        if (currentUser) {
+          const userRef = doc(db, 'users', editingUser.uid);
+          await updateDoc(userRef, updatedFields);
+        } else {
+          const updatedList = usersList.map((u) =>
+            u.uid === editingUser.uid ? { ...u, ...updatedFields } : u
+          );
+          localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(updatedList));
+        }
 
         if (userProfile) {
           recordAuditLog(userProfile, 'USUARIO_ESTADO', {
@@ -116,7 +144,6 @@ export const SellerManagement: React.FC = () => {
           });
         }
       } else {
-        // Create new user with credentials
         if (!password || password.length < 6) {
           setFormError('La contraseña inicial debe tener al menos 6 caracteres.');
           setIsSubmitting(false);
@@ -124,7 +151,7 @@ export const SellerManagement: React.FC = () => {
         }
 
         const newUid = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        const newProfile: UserProfile = {
+        const newProfile: UserProfile = stripUndefined({
           uid: newUid,
           fullName: fullName.trim(),
           username: username.trim().toLowerCase() || email.split('@')[0],
@@ -133,9 +160,14 @@ export const SellerManagement: React.FC = () => {
           supervisorId: supervisorId || null,
           active: true,
           createdAt: new Date().toISOString()
-        };
+        });
 
-        await setDoc(doc(db, 'users', newUid), newProfile);
+        if (currentUser) {
+          await setDoc(doc(db, 'users', newUid), newProfile);
+        } else {
+          const updatedList = [newProfile, ...loadLocalUsers()];
+          localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(updatedList));
+        }
 
         if (userProfile) {
           recordAuditLog(userProfile, 'USUARIO_CREADO', {
@@ -152,6 +184,7 @@ export const SellerManagement: React.FC = () => {
       setPassword('');
       setRole('seller');
       setSupervisorId('');
+      setActionFeedback({ type: 'success', text: 'Usuario guardado correctamente.' });
       fetchUsers();
     } catch (err: any) {
       console.error('Error saving user:', err);
@@ -162,33 +195,40 @@ export const SellerManagement: React.FC = () => {
   };
 
   // Toggle Active / Suspended
-  const toggleUserActive = async (user: UserProfile) => {
+  const executeToggleUserActive = async (user: UserProfile) => {
+    setConfirmToggleUid(null);
     if (user.uid === userProfile?.uid) {
-      alert('No puedes suspender tu propia cuenta administrativa.');
+      setActionFeedback({ type: 'error', text: 'No puedes suspender tu propia cuenta administrativa.' });
       return;
     }
 
     const nextStatus = !user.active;
-    const confirmMsg = nextStatus
-      ? `¿Reactivar la cuenta de ${user.fullName}?`
-      : `¿Suspender la cuenta de ${user.fullName}? No podrá iniciar sesión ni enviar registros.`;
-
-    if (!window.confirm(confirmMsg)) return;
-
     try {
-      await updateDoc(doc(db, 'users', user.uid), {
-        active: nextStatus,
-        updatedAt: new Date().toISOString()
-      });
+      if (currentUser) {
+        await updateDoc(doc(db, 'users', user.uid), {
+          active: nextStatus,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        const updatedList = usersList.map((u) =>
+          u.uid === user.uid ? { ...u, active: nextStatus, updatedAt: new Date().toISOString() } : u
+        );
+        localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(updatedList));
+      }
 
       if (userProfile) {
         recordAuditLog(userProfile, 'USUARIO_ESTADO', {
           changes: `Cuenta ${nextStatus ? 'reactivada' : 'suspendida'}: ${user.fullName}`
         });
       }
+      setActionFeedback({
+        type: 'success',
+        text: `Cuenta de ${user.fullName} ${nextStatus ? 'reactivada' : 'suspendida'}.`
+      });
       fetchUsers();
     } catch (err) {
       console.error('Error toggling status:', err);
+      setActionFeedback({ type: 'error', text: 'No se pudo actualizar el estado de la cuenta.' });
     }
   };
 
@@ -278,6 +318,26 @@ export const SellerManagement: React.FC = () => {
             </span>
           </div>
         </div>
+
+        {/* Feedback Banner */}
+        {actionFeedback && (
+          <div
+            className={`mt-4 p-3 rounded-xl text-xs flex items-center justify-between border ${
+              actionFeedback.type === 'error'
+                ? 'bg-red-950/70 border-red-800 text-red-200'
+                : 'bg-emerald-950/70 border-emerald-800 text-emerald-200'
+            }`}
+          >
+            <span>{actionFeedback.text}</span>
+            <button
+              type="button"
+              onClick={() => setActionFeedback(null)}
+              className="text-xs opacity-75 hover:opacity-100 px-2"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Search */}
         <div className="mt-4 pt-4 border-t border-slate-700/60 relative">
@@ -401,16 +461,42 @@ export const SellerManagement: React.FC = () => {
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
 
-                          <button
-                            onClick={() => toggleUserActive(u)}
-                            className={`px-2 py-1 rounded-lg text-[11px] font-bold transition ${
-                              u.active
-                                ? 'bg-amber-950/60 hover:bg-amber-900/60 text-amber-300 border border-amber-800/80'
-                                : 'bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/80'
-                            }`}
-                          >
-                            {u.active ? 'Suspender' : 'Activar'}
-                          </button>
+                          {confirmToggleUid === u.uid ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => executeToggleUserActive(u)}
+                                className="px-2 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white text-[11px] font-bold transition"
+                              >
+                                Confirmar
+                              </button>
+                              <button
+                                onClick={() => setConfirmToggleUid(null)}
+                                className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px]"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                if (u.uid === userProfile?.uid) {
+                                  setActionFeedback({
+                                    type: 'error',
+                                    text: 'No puedes suspender tu propia cuenta administrativa.'
+                                  });
+                                } else {
+                                  setConfirmToggleUid(u.uid);
+                                }
+                              }}
+                              className={`px-2 py-1 rounded-lg text-[11px] font-bold transition ${
+                                u.active
+                                  ? 'bg-amber-950/60 hover:bg-amber-900/60 text-amber-300 border border-amber-800/80'
+                                  : 'bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/80'
+                              }`}
+                            >
+                              {u.active ? 'Suspender' : 'Activar'}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

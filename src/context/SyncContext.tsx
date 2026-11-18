@@ -1,17 +1,15 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import {
   savePendingSync,
   getPendingSyncItems,
   removePendingSyncItem,
-  countPendingSync,
   saveCachedClient,
-  deleteCachedClient,
   getCachedClients,
   cacheClientsLocally
 } from '../lib/idb';
 import { ClientData, PendingSyncItem } from '../types';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, setDoc, getDoc, collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
+import { db, stripUndefined } from '../lib/firebase';
+import { doc, setDoc, getDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { recordAuditLog } from '../lib/audit';
 import { useAuth } from './AuthContext';
 
@@ -31,12 +29,80 @@ interface SyncContextType {
 
 const SyncContext = createContext<SyncContextType | undefined>(undefined);
 
+function getInitialSampleClients(): ClientData[] {
+  const now = Date.now();
+  return [
+    {
+      clientId: 'CLI_DO_001',
+      fullName: 'Rafael Antonio De La Cruz (Colmado San Rafael)',
+      cedula: '001-0872635-7',
+      phone: '8095412234',
+      secondaryPhone: '8296541122',
+      sector: 'Piantini (Distrito Nacional)',
+      street: 'Av. Gustavo Mejía Ricart',
+      localNumber: 'No. 45-B',
+      additionalAddress: 'Esq. Manuel de Jesús Troncoso, frente a torre corporativa',
+      latitude: 18.473520,
+      longitude: -69.932450,
+      accuracy: 4.2,
+      capturedAt: new Date(now - 3600000 * 5).toISOString(),
+      sellerId: 'demo_seller_carlos',
+      sellerName: 'Carlos Manuel Gómez',
+      supervisorId: 'demo_supervisor_roberto',
+      createdAt: new Date(now - 3600000 * 5).toISOString(),
+      updatedAt: new Date(now - 3600000 * 5).toISOString(),
+      syncStatus: 'synced'
+    },
+    {
+      clientId: 'CLI_DO_002',
+      fullName: 'Ana María Rodríguez Peña (Distribuidora Los Prados)',
+      cedula: '001-1678942-1',
+      phone: '8296338891',
+      sector: 'Los Prados (Distrito Nacional)',
+      street: 'Calle Lorenzo Despradel',
+      localNumber: 'No. 12',
+      additionalAddress: 'Al lado de la panadería Los Prados',
+      latitude: 18.481230,
+      longitude: -69.954120,
+      accuracy: 6.8,
+      capturedAt: new Date(now - 86400000 * 2).toISOString(),
+      sellerId: 'demo_seller_carlos',
+      sellerName: 'Carlos Manuel Gómez',
+      supervisorId: 'demo_supervisor_roberto',
+      createdAt: new Date(now - 86400000 * 2).toISOString(),
+      updatedAt: new Date(now - 86400000 * 2).toISOString(),
+      syncStatus: 'synced'
+    },
+    {
+      clientId: 'CLI_DO_003',
+      fullName: 'Juan Carlos Morales Jiménez (Farmacia Gurabo)',
+      cedula: '031-0456123-2',
+      phone: '8095827712',
+      sector: 'Santiago - Gurabo',
+      street: 'Carretera Luperón Km 3.5',
+      localNumber: 'No. 104',
+      additionalAddress: 'Frente a plaza comercial Gurabo',
+      latitude: 19.467810,
+      longitude: -70.672340,
+      accuracy: 5.1,
+      capturedAt: new Date(now - 86400000 * 4).toISOString(),
+      sellerId: 'demo_seller_carlos',
+      sellerName: 'Carlos Manuel Gómez',
+      supervisorId: 'demo_supervisor_roberto',
+      createdAt: new Date(now - 86400000 * 4).toISOString(),
+      updatedAt: new Date(now - 86400000 * 4).toISOString(),
+      syncStatus: 'synced'
+    }
+  ];
+}
+
 export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { userProfile, activeRole } = useAuth();
+  const { currentUser, userProfile, activeRole } = useAuth();
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [pendingItems, setPendingItems] = useState<PendingSyncItem[]>([]);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const isSyncingRef = useRef<boolean>(false);
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
   const [allClients, setAllClients] = useState<ClientData[]>([]);
   const [loadingClients, setLoadingClients] = useState<boolean>(true);
@@ -52,21 +118,16 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Fetch or sync all clients from Firestore or IndexedDB
+  // Fetch or sync all clients from Firestore (when authenticated) or IndexedDB
   const refreshClients = useCallback(async () => {
     setLoadingClients(true);
     try {
-      if (isOnline && userProfile) {
-        // Query based on role
+      if (isOnline && currentUser && userProfile) {
         let q;
-        if (activeRole === 'admin') {
-          q = collection(db, 'clients');
-        } else if (activeRole === 'supervisor') {
-          // Supervisors view clients in their team or all non-deleted
+        if (activeRole === 'admin' || activeRole === 'supervisor') {
           q = collection(db, 'clients');
         } else {
-          // Seller sees their own clients
-          q = query(collection(db, 'clients'), where('sellerId', '==', userProfile.uid));
+          q = query(collection(db, 'clients'), where('sellerId', '==', currentUser.uid));
         }
 
         const snapshot = await getDocs(q);
@@ -80,130 +141,59 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const pendingMap = new Map(localPending.map((p) => [p.clientId, p.clientData]));
 
         const mergedMap = new Map<string, ClientData>();
-        // Add remote
         remoteClients.forEach((c) => mergedMap.set(c.clientId, c));
-        // Override with pending (if newer or local)
         pendingMap.forEach((c, id) => mergedMap.set(id, c));
 
         let finalClients = Array.from(mergedMap.values());
         if (finalClients.length === 0) {
-          finalClients = [
-            {
-              clientId: 'CLI_DO_001',
-              fullName: 'Rafael Antonio De La Cruz (Colmado San Rafael)',
-              cedula: '001-0872635-4',
-              phone: '8095412234',
-              secondaryPhone: '8296541122',
-              sector: 'Piantini (Distrito Nacional)',
-              street: 'Av. Gustavo Mejía Ricart',
-              localNumber: 'No. 45-B',
-              additionalAddress: 'Esq. Manuel de Jesús Troncoso, frente a torre corporativa',
-              latitude: 18.473520,
-              longitude: -69.932450,
-              accuracy: 4.2,
-              capturedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-              sellerId: 'demo_seller_carlos',
-              sellerName: 'Carlos Manuel Gómez',
-              supervisorId: 'demo_supervisor_roberto',
-              createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-              updatedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-              syncStatus: 'synced'
-            },
-            {
-              clientId: 'CLI_DO_002',
-              fullName: 'Ana María Rodríguez Peña (Distribuidora Los Prados)',
-              cedula: '001-1678942-8',
-              phone: '8296338891',
-              sector: 'Los Prados (Distrito Nacional)',
-              street: 'Calle Lorenzo Despradel',
-              localNumber: 'No. 12',
-              additionalAddress: 'Al lado de la panadería Los Prados',
-              latitude: 18.481230,
-              longitude: -69.954120,
-              accuracy: 6.8,
-              capturedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-              sellerId: 'demo_seller_carlos',
-              sellerName: 'Carlos Manuel Gómez',
-              supervisorId: 'demo_supervisor_roberto',
-              createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-              updatedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-              syncStatus: 'synced'
-            },
-            {
-              clientId: 'CLI_DO_003',
-              fullName: 'Juan Carlos Morales Jiménez (Farmacia Gurabo)',
-              cedula: '031-0456123-2',
-              phone: '8095827712',
-              sector: 'Santiago - Gurabo',
-              street: 'Carretera Luperón Km 3.5',
-              localNumber: 'No. 104',
-              additionalAddress: 'Frente a plaza comercial Gurabo',
-              latitude: 19.467810,
-              longitude: -70.672340,
-              accuracy: 5.1,
-              capturedAt: new Date(Date.now() - 86400000 * 4).toISOString(),
-              sellerId: 'demo_seller_carlos',
-              sellerName: 'Carlos Manuel Gómez',
-              supervisorId: 'demo_supervisor_roberto',
-              createdAt: new Date(Date.now() - 86400000 * 4).toISOString(),
-              updatedAt: new Date(Date.now() - 86400000 * 4).toISOString(),
-              syncStatus: 'synced'
-            }
-          ];
+          finalClients = getInitialSampleClients();
         }
 
-        // Sort newest first
         finalClients.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
         setAllClients(finalClients);
-        // Cache locally for offline reading
         await cacheClientsLocally(finalClients);
       } else {
-        // Offline mode: load from IndexedDB
+        // Local IndexedDB mode (offline or instant workspace without Firebase Auth session)
         let cached = await getCachedClients();
-        if (cached.length === 0) {
-          cached = [
-            {
-              clientId: 'CLI_DO_001',
-              fullName: 'Rafael Antonio De La Cruz (Colmado San Rafael)',
-              cedula: '001-0872635-4',
-              phone: '8095412234',
-              sector: 'Piantini (Distrito Nacional)',
-              street: 'Av. Gustavo Mejía Ricart',
-              localNumber: 'No. 45-B',
-              latitude: 18.473520,
-              longitude: -69.932450,
-              accuracy: 4.2,
-              capturedAt: new Date().toISOString(),
-              sellerId: 'demo_seller_carlos',
-              sellerName: 'Carlos Manuel Gómez',
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              syncStatus: 'synced'
-            }
-          ];
+        const localPending = await getPendingSyncItems();
+        const mergedMap = new Map<string, ClientData>();
+        cached.forEach((c) => mergedMap.set(c.clientId, c));
+        localPending.forEach((p) => mergedMap.set(p.clientId, p.clientData));
+
+        let localClients = Array.from(mergedMap.values());
+        if (localClients.length === 0) {
+          localClients = getInitialSampleClients();
+          await cacheClientsLocally(localClients);
         }
-        if (userProfile && activeRole === 'seller' && userProfile.uid !== 'demo_admin_luis') {
-          const sellerOnly = cached.filter((c) => c.sellerId === userProfile.uid || c.sellerId === 'demo_seller_carlos');
+
+        if (userProfile && activeRole === 'seller') {
+          const sellerOnly = localClients.filter(
+            (c) => c.sellerId === userProfile.uid || c.sellerId === 'demo_seller_carlos'
+          );
           sellerOnly.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           setAllClients(sellerOnly);
         } else {
-          cached.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          setAllClients(cached);
+          localClients.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setAllClients(localClients);
         }
       }
     } catch (err) {
       console.warn('Error fetching clients, falling back to local DB:', err);
-      const cached = await getCachedClients();
+      let cached = await getCachedClients();
+      if (cached.length === 0) {
+        cached = getInitialSampleClients();
+        await cacheClientsLocally(cached).catch(() => {});
+      }
+      cached.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setAllClients(cached);
     } finally {
       setLoadingClients(false);
     }
-  }, [isOnline, userProfile, activeRole]);
+  }, [isOnline, currentUser, userProfile, activeRole]);
 
-  // Execute synchronization queue
+  // Execute synchronization queue (only writes to Firestore when authenticated)
   const processSyncQueue = useCallback(async () => {
-    if (!navigator.onLine || isSyncing) return;
+    if (!navigator.onLine || !currentUser || isSyncingRef.current) return;
 
     const queue = await getPendingSyncItems();
     if (queue.length === 0) {
@@ -211,6 +201,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    isSyncingRef.current = true;
     setIsSyncing(true);
     setSyncProgress({ current: 0, total: queue.length });
 
@@ -220,36 +211,45 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const clientRef = doc(db, 'clients', item.clientId);
 
+        // Normalize sellerId if item was created before signing in
+        const normalizedSellerId =
+          !item.clientData.sellerId ||
+          item.clientData.sellerId === 'offline-seller' ||
+          item.clientData.sellerId === 'admin_luis_owner'
+            ? currentUser.uid
+            : item.clientData.sellerId;
+
+        const baseRecord: ClientData = {
+          ...item.clientData,
+          sellerId: normalizedSellerId,
+          syncStatus: 'synced'
+        };
+        delete baseRecord.syncError;
+
         if (item.action === 'delete') {
-          // Soft delete on server
-          await setDoc(clientRef, { ...item.clientData, deletedAt: new Date().toISOString() }, { merge: true });
+          const deletedRecord = stripUndefined({
+            ...baseRecord,
+            deletedAt: baseRecord.deletedAt || new Date().toISOString()
+          });
+          await setDoc(clientRef, deletedRecord, { merge: true });
+          await saveCachedClient(deletedRecord);
         } else {
-          // Check conflict resolution
           const remoteSnap = await getDoc(clientRef);
           if (remoteSnap.exists()) {
             const remoteData = remoteSnap.data() as ClientData;
             const remoteTime = new Date(remoteData.updatedAt || remoteData.createdAt).getTime();
             const localTime = new Date(item.clientData.updatedAt || item.clientData.createdAt).getTime();
 
-            // If server version is strictly newer by someone else, resolve conservatively
             if (remoteTime > localTime && remoteData.sellerId !== item.clientData.sellerId) {
               console.warn(`Conflict detected for ${item.clientId}: Remote version is newer`);
             }
           }
 
-          // Save to server
-          const syncedRecord: ClientData = {
-            ...item.clientData,
-            syncStatus: 'synced',
-            syncError: undefined
-          };
+          const syncedRecord = stripUndefined(baseRecord);
           await setDoc(clientRef, syncedRecord);
-
-          // Update local cache to synced
           await saveCachedClient(syncedRecord);
         }
 
-        // Successfully processed: remove from pending queue
         await removePendingSyncItem(item.id);
 
         if (userProfile) {
@@ -261,11 +261,10 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch (error: any) {
         console.error(`Error syncing item ${item.clientId}:`, error);
-        // Increment retry and record error
         await savePendingSync({
           ...item,
           retryCount: item.retryCount + 1,
-          lastError: error.message || 'Error de red'
+          lastError: error?.message || 'Error de red'
         });
       } finally {
         processedCount++;
@@ -273,32 +272,54 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
+    isSyncingRef.current = false;
     setIsSyncing(false);
     setSyncProgress(null);
     await updatePendingState();
     await refreshClients();
-  }, [isSyncing, updatePendingState, refreshClients, userProfile]);
+  }, [currentUser, updatePendingState, refreshClients, userProfile]);
 
   // Queue client registration or update
   const enqueueClient = async (clientData: ClientData, action: 'create' | 'update' | 'delete' = 'create') => {
+    const canSyncNow = navigator.onLine && Boolean(currentUser);
+    const cleanData = stripUndefined({
+      ...clientData,
+      syncStatus: (canSyncNow ? 'syncing' : 'pending') as ClientData['syncStatus']
+    });
+    delete cleanData.syncError;
+
+    // If working in instant local workspace (no Firebase Auth session yet), persist cleanly in IndexedDB without queuing failed auth errors
+    if (!currentUser) {
+      const localRecord: ClientData = {
+        ...cleanData,
+        syncStatus: 'pending'
+      };
+      await saveCachedClient(localRecord);
+      setAllClients((prev) => {
+        const idx = prev.findIndex((c) => c.clientId === localRecord.clientId);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = localRecord;
+          return copy;
+        }
+        return [localRecord, ...prev];
+      });
+      return;
+    }
+
     const queueId = `sync_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const pendingItem: PendingSyncItem = {
       id: queueId,
       clientId: clientData.clientId,
       action,
-      clientData: {
-        ...clientData,
-        syncStatus: isOnline ? 'syncing' : 'pending'
-      },
+      clientData: cleanData,
       timestamp: Date.now(),
       retryCount: 0
     };
 
-    // Save to IndexedDB queue and cache
     await savePendingSync(pendingItem);
     await updatePendingState();
 
-    // Immediately update in-memory list
     setAllClients((prev) => {
       const idx = prev.findIndex((c) => c.clientId === clientData.clientId);
       if (idx >= 0) {
@@ -309,11 +330,10 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return [pendingItem.clientData, ...prev];
     });
 
-    // If online, immediately process queue in background
-    if (navigator.onLine) {
+    if (canSyncNow) {
       setTimeout(() => {
         processSyncQueue();
-      }, 200);
+      }, 150);
     }
   };
 
@@ -333,7 +353,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await enqueueClient(updated, 'delete');
   };
 
-  // Online / Offline listeners
+  // Online / Offline listeners & initial load
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
@@ -355,6 +375,13 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window.removeEventListener('offline', handleOffline);
     };
   }, [updatePendingState, refreshClients, processSyncQueue]);
+
+  // Flush pending sync queue when user authenticates while online
+  useEffect(() => {
+    if (currentUser && isOnline) {
+      processSyncQueue();
+    }
+  }, [currentUser, isOnline, processSyncQueue]);
 
   return (
     <SyncContext.Provider

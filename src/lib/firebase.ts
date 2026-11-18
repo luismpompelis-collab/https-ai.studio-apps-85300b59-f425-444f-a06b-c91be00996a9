@@ -57,6 +57,30 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+// Strip undefined properties recursively before sending payloads to Firestore
+export function stripUndefined<T>(value: T): T {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefined(item)) as unknown as T;
+  }
+  if (typeof value === 'object') {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      return value;
+    }
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v !== undefined) {
+        clean[k] = stripUndefined(v);
+      }
+    }
+    return clean as T;
+  }
+  return value;
+}
+
 // Boot connection check
 export async function testFirebaseConnection(): Promise<boolean> {
   try {

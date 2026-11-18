@@ -23,6 +23,7 @@ export const AuditLogView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'audit' | 'recycleBin'>('audit');
   const [search, setSearch] = useState('');
+  const [restoreFeedback, setRestoreFeedback] = useState<string | null>(null);
 
   const loadLogs = async () => {
     setLoading(true);
@@ -40,9 +41,6 @@ export const AuditLogView: React.FC = () => {
 
   // Restore client from recycle bin
   const handleRestore = async (client: ClientData) => {
-    if (!window.confirm(`¿Deseas restaurar al cliente "${client.fullName}" de la papelera?`)) {
-      return;
-    }
     const restored: ClientData = {
       ...client,
       deletedAt: null,
@@ -51,6 +49,7 @@ export const AuditLogView: React.FC = () => {
       syncStatus: 'pending'
     };
     await enqueueClient(restored, 'update');
+    setRestoreFeedback(`Expediente de "${client.fullName}" restaurado correctamente.`);
     await loadLogs();
   };
 
@@ -213,6 +212,13 @@ export const AuditLogView: React.FC = () => {
               </p>
             </div>
           </div>
+
+          {restoreFeedback && (
+            <div className="p-3 bg-emerald-950/70 border border-emerald-800 text-emerald-200 rounded-xl text-xs flex items-center justify-between">
+              <span>{restoreFeedback}</span>
+              <button onClick={() => setRestoreFeedback(null)} className="px-2">✕</button>
+            </div>
+          )}
 
           {deletedClients.length === 0 ? (
             <div className="py-12 text-center text-slate-400 italic">

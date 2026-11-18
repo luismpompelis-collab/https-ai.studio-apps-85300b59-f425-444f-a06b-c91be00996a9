@@ -9,7 +9,7 @@ import {
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { auth, googleProvider, db } from '../lib/firebase';
+import { auth, googleProvider, db, stripUndefined } from '../lib/firebase';
 import { UserProfile, UserRole } from '../types';
 import { recordAuditLog } from '../lib/audit';
 import { writePresenceHeartbeat } from '../lib/presence';
@@ -68,7 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           createdAt: new Date().toISOString()
         };
         try {
-          await setDoc(userRef, initialProfile);
+          await setDoc(userRef, stripUndefined(initialProfile));
         } catch (e) {
           console.warn('Could not write profile to Firestore:', e);
         }
@@ -163,7 +163,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error?.code === 'auth/operation-not-allowed' || error?.message?.includes('operation-not-allowed')) {
         throw new Error(
           'El proveedor de Correo/Contraseña no está habilitado en la consola de Firebase. ' +
-          'Por favor utiliza "Continuar con Cuenta Google" o los botones de "Acceso Rápido de Prueba (Demo)" abajo.'
+          'Por favor utiliza "Continuar con Cuenta Google".'
         );
       }
       throw error;
@@ -184,7 +184,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         active: true,
         createdAt: new Date().toISOString()
       };
-      await setDoc(userRef, newProfile);
+      await setDoc(userRef, stripUndefined(newProfile));
       setUserProfile(newProfile);
       recordAuditLog(newProfile, 'USUARIO_CREADO', { changes: `Usuario registrado: ${email}` });
     } catch (error: any) {
@@ -192,7 +192,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error?.code === 'auth/operation-not-allowed' || error?.message?.includes('operation-not-allowed')) {
         throw new Error(
           'El proveedor de Correo/Contraseña no está habilitado en Firebase. ' +
-          'Por favor utiliza el botón de Google o los botones de Demo.'
+          'Por favor utiliza "Continuar con Cuenta Google".'
         );
       }
       throw error;

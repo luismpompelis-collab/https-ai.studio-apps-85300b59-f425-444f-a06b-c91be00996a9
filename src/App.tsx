@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { PresenceProvider } from './context/PresenceContext';
-import { SyncProvider } from './context/SyncContext';
+import { SyncProvider, useSync } from './context/SyncContext';
 import { Navbar } from './components/Navbar';
 import { ClientForm } from './components/ClientForm';
 import { ClientList } from './components/ClientList';
@@ -21,10 +21,15 @@ type ViewMode = 'register' | 'clients' | 'map' | 'dashboard' | 'sellers' | 'audi
 
 function MainApp() {
   const { currentUser, userProfile, loading, activeRole } = useAuth();
+  const { allClients } = useSync();
   const [currentView, setCurrentView] = useState<ViewMode>('register');
   const [selectedClient, setSelectedClient] = useState<ClientData | null>(null);
   const [editingClient, setEditingClient] = useState<ClientData | null>(null);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+
+  const liveSelectedClient = selectedClient
+    ? allClients.find((c) => c.clientId === selectedClient.clientId) || selectedClient
+    : null;
 
   // Connection test on boot
   useEffect(() => {
@@ -82,6 +87,7 @@ function MainApp() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {currentView === 'register' && (
           <ClientForm
+            key={editingClient?.clientId || 'new'}
             initialClient={editingClient}
             onSuccess={handleFormSuccess}
             onCancel={editingClient ? () => { setEditingClient(null); setCurrentView('clients'); } : undefined}
@@ -117,9 +123,9 @@ function MainApp() {
       </main>
 
       {/* Client Dossier Modal */}
-      {selectedClient && (
+      {liveSelectedClient && (
         <ClientDossierModal
-          client={selectedClient}
+          client={liveSelectedClient}
           onClose={() => setSelectedClient(null)}
           onEdit={handleEditClient}
         />
