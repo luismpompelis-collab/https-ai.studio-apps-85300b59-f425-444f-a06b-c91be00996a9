@@ -13,6 +13,14 @@ export interface UserProfile {
   updatedAt?: string;
 }
 
+export interface PresenceRecord {
+  uid: string;
+  fullName: string;
+  role: UserRole;
+  isOnline: boolean;
+  lastSeenAt: unknown;
+}
+
 export type SyncStatus = 'synced' | 'pending' | 'syncing' | 'failed';
 
 export interface GPSLocation {

@@ -1,4 +1,11 @@
 import React, { useState } from 'react';
+import {
+  Map as GoogleMap,
+  AdvancedMarker,
+  Pin,
+  useApiLoadingStatus,
+  APILoadingStatus
+} from '@vis.gl/react-google-maps';
 import { ClientData, ClientStage, ClientNote } from '../types';
 import {
   formatDominicanDateTime,
@@ -6,6 +13,11 @@ import {
 } from '../lib/dominicanValidation';
 import { generateClientPDF } from '../lib/pdfExport';
 import { sharePlanillaViaWhatsApp } from '../lib/whatsappExport';
+import {
+  GOOGLE_MAPS_API_KEY,
+  GMP_MAP_ID,
+  GMP_ATTRIBUTION_IDS
+} from '../lib/googleMaps';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import {
@@ -45,6 +57,7 @@ export const ClientDossierModal: React.FC<ClientDossierModalProps> = ({
 }) => {
   const { activeRole, userProfile } = useAuth();
   const { removeClientLocallyAndRemote, enqueueClient } = useSync();
+  const apiStatus = useApiLoadingStatus();
 
   const [copiedAll, setCopiedAll] = useState(false);
   const [copiedGps, setCopiedGps] = useState(false);
@@ -400,6 +413,35 @@ Estado de Sincronización: ${client.syncStatus.toUpperCase()}
                     {client.capturedAt ? formatDominicanDateTime(client.capturedAt) : '-'}
                   </span>
                 </div>
+
+                {GOOGLE_MAPS_API_KEY &&
+                  apiStatus !== APILoadingStatus.FAILED &&
+                  apiStatus !== APILoadingStatus.AUTH_FAILURE && (
+                  <div className="h-52 w-full rounded-xl overflow-hidden border border-slate-800 shadow-inner">
+                    <GoogleMap
+                      key={client.clientId}
+                      mapId={GMP_MAP_ID}
+                      defaultCenter={{ lat: client.latitude, lng: client.longitude }}
+                      defaultZoom={16}
+                      gestureHandling="cooperative"
+                      mapTypeControl={true}
+                      streetViewControl={true}
+                      internalUsageAttributionIds={GMP_ATTRIBUTION_IDS}
+                      style={{ width: '100%', height: '100%' }}
+                    >
+                      <AdvancedMarker
+                        position={{ lat: client.latitude, lng: client.longitude }}
+                        title={client.fullName}
+                      >
+                        <Pin
+                          background={stage === 'aprobado' || stage === 'verificado' ? '#10b981' : '#3b82f6'}
+                          borderColor="#ffffff"
+                          glyphColor="#ffffff"
+                        />
+                      </AdvancedMarker>
+                    </GoogleMap>
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-xs text-slate-400 italic">No se registraron coordenadas GPS satelitales para este cliente.</p>

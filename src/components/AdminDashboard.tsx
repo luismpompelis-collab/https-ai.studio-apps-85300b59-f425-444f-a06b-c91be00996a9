@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { useSync } from '../context/SyncContext';
 import { useAuth } from '../context/AuthContext';
+import { usePresence } from '../context/PresenceContext';
+import { formatLastSeenAgo } from '../lib/presence';
 import {
   Users,
   Calendar,
@@ -13,8 +15,9 @@ import {
   CheckCircle2,
   AlertCircle,
   BarChart3,
-  PieChart,
-  ArrowUpRight
+  ArrowUpRight,
+  Radio,
+  UserCheck
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -24,6 +27,13 @@ interface AdminDashboardProps {
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateToClients }) => {
   const { allClients } = useSync();
   const { activeRole } = useAuth();
+  const {
+    connectedSupervisors,
+    connectedSellers,
+    totalConnectedTeam,
+    isLiveTracking,
+    nowMs
+  } = usePresence();
   const [timelinePeriod, setTimelinePeriod] = useState<'day' | 'week' | 'month'>('day');
 
   // Active (non-deleted) clients
@@ -191,6 +201,122 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateToClie
           </button>
         </div>
       </div>
+
+      {/* Live Connected Supervisors & Sellers (Admin Only) */}
+      {activeRole === 'admin' && (
+        <div className="bg-slate-900/80 border border-emerald-500/25 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800/80">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  Conexión en Tiempo Real
+                </span>
+              </div>
+              <h2 className="text-base sm:text-lg font-black text-white mt-1 flex items-center gap-2">
+                <Radio className="w-5 h-5 text-emerald-400" />
+                Personal Conectado (Supervisores y Vendedores)
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {isLiveTracking
+                  ? 'Monitoreo en vivo de supervisores y vendedores activos en la plataforma'
+                  : 'Inicia sesión con tu cuenta de Google para sincronizar conexiones en vivo entre dispositivos'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 self-start sm:self-auto">
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Total Conectados
+                </p>
+                <p className="text-2xl font-black text-emerald-400 font-mono tabular-nums leading-none mt-0.5">
+                  {totalConnectedTeam}
+                </p>
+              </div>
+              <div className="h-9 w-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                <UserCheck className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Breakdown Counters */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Supervisores Conectados
+                </p>
+                <p className="text-2xl font-extrabold text-emerald-400 font-mono tabular-nums mt-1">
+                  {connectedSupervisors.length}
+                </p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400">
+                <Shield className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Vendedores Conectados
+                </p>
+                <p className="text-2xl font-extrabold text-blue-400 font-mono tabular-nums mt-1">
+                  {connectedSellers.length}
+                </p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-400">
+                <Users className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Suma Equipo Activo
+                </p>
+                <p className="text-2xl font-extrabold text-white font-mono tabular-nums mt-1">
+                  {totalConnectedTeam}
+                </p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400">
+                <Radio className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Active Team Members List */}
+          {totalConnectedTeam > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+              {[...connectedSupervisors, ...connectedSellers].map((person) => (
+                <div
+                  key={person.uid}
+                  className="bg-slate-950/50 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shrink-0 ring-2 ring-emerald-500/20" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white truncate">{person.fullName}</p>
+                      <p className="text-[10px] text-slate-400">
+                        {person.role === 'supervisor' ? 'Supervisor' : 'Vendedor'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-300 shrink-0">
+                    {formatLastSeenAgo(person.lastSeenAt, nowMs)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500 italic">
+              No hay supervisores ni vendedores conectados en este momento.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* 8 Statistics Cards - High Precision Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

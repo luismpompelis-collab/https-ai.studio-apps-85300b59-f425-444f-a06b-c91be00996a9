@@ -1,46 +1,161 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
-import L from 'leaflet';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import {
+  Map as GoogleMap,
+  AdvancedMarker,
+  AdvancedMarkerAnchorPoint,
+  Pin,
+  InfoWindow,
+  useMap,
+  useAdvancedMarkerRef,
+  useApiLoadingStatus,
+  APILoadingStatus
+} from '@vis.gl/react-google-maps';
 import { ClientData } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
-import { formatDominicanPhone } from '../lib/dominicanValidation';
 import {
-  MapPin,
-  ExternalLink,
+  GOOGLE_MAPS_API_KEY,
+  GMP_MAP_ID,
+  GMP_ATTRIBUTION_IDS,
+  DR_DEFAULT_CENTER
+} from '../lib/googleMaps';
+import {
   Navigation,
   MessageCircle,
-  Eye,
   Search,
-  Filter,
-  Layers,
   Compass,
-  CheckCircle2
+  MapPin,
+  AlertTriangle,
+  Eye
 } from 'lucide-react';
 
 interface ClientMapViewProps {
   onSelectClient: (client: ClientData) => void;
 }
 
+interface ClientMarkerProps {
+  client: ClientData;
+  zIndex: number;
+  isSelected: boolean;
+  isHovered: boolean;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  onMarkerClick: (
+    client: ClientData,
+    marker: google.maps.marker.AdvancedMarkerElement
+  ) => void;
+}
+
+const ClientAdvancedMarker: React.FC<ClientMarkerProps> = ({
+  client,
+  zIndex,
+  isSelected,
+  isHovered,
+  onMouseEnter,
+  onMouseLeave,
+  onMarkerClick
+}) => {
+  const [markerRef, marker] = useAdvancedMarkerRef();
+
+  const isVerified = client.stage === 'aprobado' || client.stage === 'verificado';
+  const pinColor = isSelected ? '#f59e0b' : isVerified ? '#10b981' : '#3b82f6';
+  const borderColor = isSelected ? '#78350f' : isVerified ? '#065f46' : '#1e3a8a';
+
+  return (
+    <AdvancedMarker
+      ref={markerRef}
+      position={{ lat: client.latitude!, lng: client.longitude! }}
+      zIndex={zIndex}
+      title={client.fullName}
+      onClick={() => {
+        if (marker) {
+          onMarkerClick(client, marker);
+        }
+      }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      style={{
+        transform: `scale(${isSelected || isHovered ? 1.2 : 1})`,
+        transformOrigin: AdvancedMarkerAnchorPoint.BOTTOM.join(' ')
+      }}
+    >
+      <Pin
+        background={pinColor}
+        borderColor={borderColor}
+        glyphColor="#ffffff"
+        scale={isSelected ? 1.15 : 1}
+      />
+    </AdvancedMarker>
+  );
+};
+
+interface ViewportControllerProps {
+  clients: ClientData[];
+  recenterSignal: number;
+}
+
+const MapViewportController: React.FC<ViewportControllerProps> = ({
+  clients,
+  recenterSignal
+}) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map) return;
+
+    if (clients.length === 0) {
+      map.setCenter(DR_DEFAULT_CENTER);
+      map.setZoom(8);
+      return;
+    }
+
+    if (clients.length === 1) {
+      const only = clients[0];
+      map.setCenter({ lat: only.latitude!, lng: only.longitude! });
+      map.setZoom(15);
+      return;
+    }
+
+    const bounds = new google.maps.LatLngBounds();
+    clients.forEach((c) => {
+      if (c.latitude !== null && c.longitude !== null) {
+        bounds.extend({ lat: c.latitude, lng: c.longitude });
+      }
+    });
+    map.fitBounds(bounds, 50);
+  }, [map, clients, recenterSignal]);
+
+  return null;
+};
+
 export const ClientMapView: React.FC<ClientMapViewProps> = ({ onSelectClient }) => {
   const { allClients } = useSync();
   const { activeRole, userProfile } = useAuth();
-
-  const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const apiStatus = useApiLoadingStatus();
 
   const [search, setSearch] = useState('');
   const [selectedSeller, setSelectedSeller] = useState('');
   const [activeStage, setActiveStage] = useState<string>('all');
+  const [recenterSignal, setRecenterSignal] = useState(0);
+
+  const [selectedClient, setSelectedClient] = useState<ClientData | null>(null);
+  const [selectedMarker, setSelectedMarker] =
+    useState<google.maps.marker.AdvancedMarkerElement | null>(null);
+  const [hoveredClientId, setHoveredClientId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (apiStatus === APILoadingStatus.AUTH_FAILURE) {
+      window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+    }
+  }, [apiStatus]);
 
   // Filter clients with valid GPS coordinates
   const geocodedClients = useMemo(() => {
-    return allClients.filter((c) => {
+    const filtered = allClients.filter((c) => {
       if (c.deletedAt) return false;
       if (c.latitude === null || c.longitude === null) return false;
-      if (isNaN(c.latitude) || isNaN(c.longitude)) return false;
+      if (Number.isNaN(c.latitude) || Number.isNaN(c.longitude)) return false;
 
-      // Role filter
       if (activeRole === 'seller' && c.sellerId !== userProfile?.uid) {
         return false;
       }
@@ -58,143 +173,59 @@ export const ClientMapView: React.FC<ClientMapViewProps> = ({ onSelectClient }) 
 
       return true;
     });
+
+    // Sort descending by latitude so southern markers render visually in front
+    return [...filtered].sort((a, b) => (b.latitude ?? 0) - (a.latitude ?? 0));
   }, [allClients, activeRole, userProfile, selectedSeller, activeStage, search]);
 
-  // Distinct sellers
+  // Distinct sellers (avoid shadowing global Map constructor)
   const distinctSellers = useMemo(() => {
-    const map = new Map<string, string>();
+    const sellerIndex: Record<string, string> = {};
     allClients.forEach((c) => {
-      if (c.sellerId && c.sellerName) map.set(c.sellerId, c.sellerName);
+      if (c.sellerId && c.sellerName) {
+        sellerIndex[c.sellerId] = c.sellerName;
+      }
     });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+    return Object.entries(sellerIndex).map(([id, name]) => ({ id, name }));
   }, [allClients]);
 
-  // Initialize Leaflet Map
-  useEffect(() => {
-    if (!mapContainerRef.current) return;
+  const handleMarkerClick = useCallback(
+    (client: ClientData, marker: google.maps.marker.AdvancedMarkerElement) => {
+      setSelectedClient(client);
+      setSelectedMarker(marker);
+    },
+    []
+  );
 
-    if (!mapInstanceRef.current) {
-      // Center of Dominican Republic: Lat 18.7357, Lng -70.1627
-      const map = L.map(mapContainerRef.current, {
-        center: [18.7357, -70.1627],
-        zoom: 8,
-        zoomControl: true
-      });
-
-      // CartoDB Dark Matter / Stadia / OSM tiles
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://carto.com/">CARTO</a> OpenStreetMap',
-        maxZoom: 19
-      }).addTo(map);
-
-      const markersGroup = L.layerGroup().addTo(map);
-      markersLayerRef.current = markersGroup;
-      mapInstanceRef.current = map;
-    }
-
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
-      }
-    };
+  const handleMapClick = useCallback(() => {
+    setSelectedClient(null);
+    setSelectedMarker(null);
   }, []);
 
-  // Update Markers
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    const layer = markersLayerRef.current;
-    if (!map || !layer) return;
+  const handleInfoWindowClose = useCallback(() => {
+    setSelectedClient(null);
+    setSelectedMarker(null);
+  }, []);
 
-    layer.clearLayers();
-
-    const bounds: L.LatLngBounds = L.latLngBounds([]);
-
-    geocodedClients.forEach((client) => {
-      if (client.latitude === null || client.longitude === null) return;
-
-      const latLng = L.latLng(client.latitude, client.longitude);
-      bounds.extend(latLng);
-
-      // Custom SVG Marker Icon
-      const isVerified = client.stage === 'aprobado' || client.stage === 'verificado';
-      const pinColor = isVerified ? '#10b981' : '#3b82f6';
-
-      const customIcon = L.divIcon({
-        className: 'custom-client-pin',
-        html: `
-          <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; transform: translate(-50%, -50%);">
-            <div style="position: absolute; width: 32px; height: 32px; border-radius: 50%; background: ${pinColor}25; animation: pulse 2s infinite;"></div>
-            <div style="position: absolute; width: 22px; height: 22px; border-radius: 50%; background: ${pinColor}; border: 2.5px solid #ffffff; box-shadow: 0 4px 10px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center;">
-              <span style="width: 6px; height: 6px; border-radius: 50%; background: #ffffff;"></span>
-            </div>
-          </div>
-        `,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16]
-      });
-
-      const cleanPhone = client.phone.replace(/\D/g, '');
-      const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${client.latitude},${client.longitude}`;
-      const wazeUrl = `https://waze.com/ul?ll=${client.latitude},${client.longitude}&navigate=yes`;
-      const whatsAppUrl = `https://wa.me/1${cleanPhone}?text=${encodeURIComponent(`Hola ${client.fullName}, le contactamos de CLIENTES PRO.`)}`;
-
-      const popupContent = document.createElement('div');
-      popupContent.className = 'p-1 text-slate-900';
-      popupContent.innerHTML = `
-        <div style="min-width: 210px; font-family: sans-serif;">
-          <h4 style="margin: 0 0 2px 0; font-size: 14px; font-weight: 800; color: #0f172a;">${client.fullName}</h4>
-          <p style="margin: 0 0 6px 0; font-size: 11px; color: #64748b; font-family: monospace;">Cédula: ${client.cedula}</p>
-          <div style="margin-bottom: 8px; font-size: 11px; color: #334155; background: #f1f5f9; padding: 4px 6px; border-radius: 6px;">
-            <strong>Sector:</strong> ${client.sector}<br/>
-            <strong>Calle:</strong> ${client.street}, No. ${client.localNumber}
-          </div>
-          <div style="display: flex; gap: 4px; margin-bottom: 8px;">
-            <a href="${whatsAppUrl}" target="_blank" rel="noopener noreferrer" style="flex: 1; text-align: center; background: #10b981; color: white; padding: 5px; border-radius: 6px; font-size: 11px; font-weight: bold; text-decoration: none;">
-              WhatsApp
-            </a>
-            <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" style="flex: 1; text-align: center; background: #2563eb; color: white; padding: 5px; border-radius: 6px; font-size: 11px; font-weight: bold; text-decoration: none;">
-              Maps
-            </a>
-            <a href="${wazeUrl}" target="_blank" rel="noopener noreferrer" style="flex: 1; text-align: center; background: #0ea5e9; color: white; padding: 5px; border-radius: 6px; font-size: 11px; font-weight: bold; text-decoration: none;">
-              Waze
-            </a>
-          </div>
-          <button id="btn-view-${client.clientId}" style="width: 100%; background: #0f172a; color: white; border: none; padding: 6px; border-radius: 6px; font-size: 11px; font-weight: bold; cursor: pointer;">
-            Ver Expediente Completo
-          </button>
-        </div>
-      `;
-
-      const marker = L.marker(latLng, { icon: customIcon }).addTo(layer);
-      marker.bindPopup(popupContent);
-
-      marker.on('popupopen', () => {
-        const btn = document.getElementById(`btn-view-${client.clientId}`);
-        if (btn) {
-          btn.onclick = () => onSelectClient(client);
-        }
-      });
-    });
-
-    if (geocodedClients.length > 0 && bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
-    }
-  }, [geocodedClients, onSelectClient]);
-
-  // Recenter on Dominican Republic
   const handleRecenter = () => {
-    if (mapInstanceRef.current) {
-      if (geocodedClients.length > 0) {
-        const bounds = L.latLngBounds(
-          geocodedClients.map((c) => L.latLng(c.latitude!, c.longitude!))
-        );
-        mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
-      } else {
-        mapInstanceRef.current.setView([18.7357, -70.1627], 8);
-      }
-    }
+    setRecenterSignal((prev) => prev + 1);
   };
+
+  const zIndexSelected = geocodedClients.length + 10;
+  const zIndexHover = geocodedClients.length + 5;
+
+  const cleanPhone = selectedClient ? selectedClient.phone.replace(/\D/g, '') : '';
+  const whatsAppUrl = selectedClient
+    ? `https://wa.me/1${cleanPhone}?text=${encodeURIComponent(
+        `Hola ${selectedClient.fullName}, le contactamos de CLIENTES PRO.`
+      )}`
+    : '';
+  const googleMapsUrl = selectedClient
+    ? `https://www.google.com/maps/dir/?api=1&destination=${selectedClient.latitude},${selectedClient.longitude}`
+    : '';
+  const wazeUrl = selectedClient
+    ? `https://waze.com/ul?ll=${selectedClient.latitude},${selectedClient.longitude}&navigate=yes`
+    : '';
 
   return (
     <div className="space-y-4 pb-20">
@@ -204,7 +235,7 @@ export const ClientMapView: React.FC<ClientMapViewProps> = ({ onSelectClient }) 
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
-                Georreferencia Satelital
+                Google Maps Platform · Satelital
               </span>
               <span className="text-xs text-slate-500">·</span>
               <span className="text-xs text-slate-400">República Dominicana</span>
@@ -214,12 +245,13 @@ export const ClientMapView: React.FC<ClientMapViewProps> = ({ onSelectClient }) 
               Radar Comercial e Interactivo de Clientes
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              Visualiza {geocodedClients.length} de {allClients.filter(c => !c.deletedAt).length} clientes georreferenciados en el territorio nacional
+              Visualiza {geocodedClients.length} de {allClients.filter((c) => !c.deletedAt).length} clientes georreferenciados en el territorio nacional
             </p>
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
             <button
+              type="button"
               onClick={handleRecenter}
               className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition flex items-center gap-1.5 border border-slate-700"
             >
@@ -280,11 +312,137 @@ export const ClientMapView: React.FC<ClientMapViewProps> = ({ onSelectClient }) 
 
       {/* Map Container */}
       <div className="relative bg-slate-950 border border-slate-800/80 rounded-2xl shadow-xl overflow-hidden h-[68vh] min-h-[420px]">
-        <div ref={mapContainerRef} className="w-full h-full z-10" />
+        {!GOOGLE_MAPS_API_KEY ? (
+          <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-3 bg-slate-900/60">
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+            <h3 className="text-sm font-bold text-white">Google Maps no está configurado</h3>
+            <p className="text-xs text-slate-400 max-w-md">
+              No se detectó la clave de Google Maps Platform en el entorno (`VITE_GOOGLE_MAPS_API_KEY`). Verifica la configuración del proyecto.
+            </p>
+          </div>
+        ) : apiStatus === APILoadingStatus.FAILED || apiStatus === APILoadingStatus.AUTH_FAILURE ? (
+          <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-3 bg-slate-900/60">
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+            <h3 className="text-sm font-bold text-white">No se pudo cargar Google Maps</h3>
+            <p className="text-xs text-slate-400 max-w-md">
+              Revisa tu conexión o la cuota de la API de Google Maps Platform. Puedes seguir consultando tus clientes en la pestaña de Expedientes.
+            </p>
+          </div>
+        ) : (
+          <GoogleMap
+            mapId={GMP_MAP_ID}
+            defaultCenter={DR_DEFAULT_CENTER}
+            defaultZoom={8}
+            gestureHandling="greedy"
+            mapTypeControl={true}
+            streetViewControl={true}
+            fullscreenControl={true}
+            clickableIcons={false}
+            internalUsageAttributionIds={GMP_ATTRIBUTION_IDS}
+            onClick={handleMapClick}
+            style={{ width: '100%', height: '100%' }}
+          >
+            <MapViewportController
+              clients={geocodedClients}
+              recenterSignal={recenterSignal}
+            />
+
+            {geocodedClients.map((client, index) => {
+              const isSelected = selectedClient?.clientId === client.clientId;
+              const isHovered = hoveredClientId === client.clientId;
+              let zIndex = index;
+              if (isHovered) zIndex = zIndexHover;
+              if (isSelected) zIndex = zIndexSelected;
+
+              return (
+                <ClientAdvancedMarker
+                  key={client.clientId}
+                  client={client}
+                  zIndex={zIndex}
+                  isSelected={isSelected}
+                  isHovered={isHovered}
+                  onMouseEnter={() => setHoveredClientId(client.clientId)}
+                  onMouseLeave={() => setHoveredClientId(null)}
+                  onMarkerClick={handleMarkerClick}
+                />
+              );
+            })}
+
+            {selectedClient && selectedMarker && (
+              <InfoWindow
+                anchor={selectedMarker}
+                onCloseClick={handleInfoWindowClose}
+                maxWidth={290}
+              >
+                <div className="p-1 text-slate-900 min-w-[220px] font-sans">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <h4 className="text-sm font-extrabold text-slate-900 leading-tight">
+                      {selectedClient.fullName}
+                    </h4>
+                  </div>
+                  <p className="text-[11px] text-slate-500 font-mono mb-2">
+                    Cédula: {selectedClient.cedula}
+                  </p>
+                  <div className="mb-2.5 text-[11px] text-slate-700 bg-slate-100 p-2 rounded-lg space-y-0.5">
+                    <div>
+                      <strong>Sector:</strong> {selectedClient.sector}
+                    </div>
+                    <div>
+                      <strong>Calle:</strong> {selectedClient.street}, No. {selectedClient.localNumber}
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5 mb-2">
+                    <a
+                      href={whatsAppUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 text-center bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 px-2 rounded-md text-[11px] font-bold flex items-center justify-center gap-1 no-underline"
+                    >
+                      <MessageCircle className="w-3 h-3" />
+                      WhatsApp
+                    </a>
+                    <a
+                      href={googleMapsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 text-center bg-blue-600 hover:bg-blue-500 text-white py-1.5 px-2 rounded-md text-[11px] font-bold flex items-center justify-center gap-1 no-underline"
+                    >
+                      <MapPin className="w-3 h-3" />
+                      Ruta
+                    </a>
+                    <a
+                      href={wazeUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 text-center bg-sky-500 hover:bg-sky-400 text-white py-1.5 px-2 rounded-md text-[11px] font-bold flex items-center justify-center gap-1 no-underline"
+                    >
+                      <Navigation className="w-3 h-3" />
+                      Waze
+                    </a>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onSelectClient(selectedClient)}
+                    className="w-full bg-slate-900 hover:bg-slate-800 text-white py-1.5 px-3 rounded-md text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    Ver Expediente Completo
+                  </button>
+                </div>
+              </InfoWindow>
+            )}
+          </GoogleMap>
+        )}
 
         {/* Floating Quick Legend */}
         <div className="absolute bottom-4 left-4 z-20 bg-slate-950/90 backdrop-blur-md border border-slate-800/80 rounded-xl p-3 text-[11px] text-white shadow-lg space-y-1.5 hidden sm:block">
-          <p className="font-bold uppercase tracking-wider text-[10px] text-slate-400">Leyenda de Cobertura</p>
+          <p className="font-bold uppercase tracking-wider text-[10px] text-slate-400">
+            Leyenda de Cobertura
+          </p>
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-500/30"></span>
             <span className="text-slate-300">Cliente Verificado / Aprobado</span>

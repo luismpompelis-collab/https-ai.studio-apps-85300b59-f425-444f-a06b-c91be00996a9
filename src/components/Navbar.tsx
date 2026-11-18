@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
+import { usePresence } from '../context/PresenceContext';
 import { UserRole } from '../types';
 import {
   Users,
@@ -13,7 +14,8 @@ import {
   Shield,
   History,
   Compass,
-  Download
+  Download,
+  Radio
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -25,6 +27,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onOpenSyncModal }) => {
   const { userProfile, logout, activeRole } = useAuth();
   const { isOnline, pendingCount, isSyncing } = useSync();
+  const { connectedSupervisors, connectedSellers, totalConnectedTeam } = usePresence();
 
   const getRoleLabel = (role: UserRole) => {
     switch (role) {
@@ -149,6 +152,21 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onOpenS
 
             {/* Right Zone: Network Indicator, Sync queue, Role switcher & Profile */}
             <div className="flex items-center space-x-2.5 sm:space-x-3">
+              {/* Admin Live Connected Supervisors + Sellers Indicator */}
+              {activeRole === 'admin' && (
+                <button
+                  onClick={() => onNavigate('dashboard')}
+                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-950/40 border border-emerald-800/60 text-emerald-300 hover:bg-emerald-900/40 transition-colors"
+                  title={`${connectedSupervisors.length} supervisores y ${connectedSellers.length} vendedores conectados`}
+                >
+                  <Radio className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="hidden lg:inline text-[11px]">Equipo:</span>
+                  <span className="font-mono font-bold tabular-nums text-[11px]">
+                    {totalConnectedTeam}
+                  </span>
+                </button>
+              )}
+
               {/* Online / Offline status badge */}
               <div
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${

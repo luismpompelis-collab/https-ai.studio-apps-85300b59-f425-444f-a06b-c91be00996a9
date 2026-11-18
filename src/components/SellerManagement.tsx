@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
+import { usePresence } from '../context/PresenceContext';
+import { isPresenceActive } from '../lib/presence';
 import { UserProfile, UserRole } from '../types';
 import { collection, doc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -8,24 +10,26 @@ import { recordAuditLog } from '../lib/audit';
 import {
   Shield,
   UserPlus,
-  Users,
   CheckCircle2,
   XCircle,
   Edit2,
-  Lock,
-  Mail,
-  User,
-  Key,
-  Layers,
   Search,
-  Activity,
-  AlertCircle
+  AlertCircle,
+  Radio,
+  Users
 } from 'lucide-react';
 import { formatDominicanDateTime } from '../lib/dominicanValidation';
 
 export const SellerManagement: React.FC = () => {
-  const { userProfile, registerWithEmail } = useAuth();
+  const { userProfile } = useAuth();
   const { allClients } = useSync();
+  const {
+    connectedSupervisors,
+    connectedSellers,
+    totalConnectedTeam,
+    presenceByUid,
+    nowMs
+  } = usePresence();
 
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -244,6 +248,37 @@ export const SellerManagement: React.FC = () => {
           </button>
         </div>
 
+        {/* Live Connection Summary */}
+        <div className="mt-4 pt-4 border-t border-slate-700/60 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Radio className="w-3.5 h-3.5 text-emerald-400" />
+              Total Conectados (Sup. + Vend.)
+            </span>
+            <span className="text-base font-black text-emerald-400 font-mono tabular-nums">
+              {totalConnectedTeam}
+            </span>
+          </div>
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5 text-emerald-400" />
+              Supervisores En Línea
+            </span>
+            <span className="text-base font-black text-white font-mono tabular-nums">
+              {connectedSupervisors.length}
+            </span>
+          </div>
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5 text-blue-400" />
+              Vendedores En Línea
+            </span>
+            <span className="text-base font-black text-white font-mono tabular-nums">
+              {connectedSellers.length}
+            </span>
+          </div>
+        </div>
+
         {/* Search */}
         <div className="mt-4 pt-4 border-t border-slate-700/60 relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 mt-2" />
@@ -283,16 +318,31 @@ export const SellerManagement: React.FC = () => {
                 filteredUsers.map((u) => {
                   const clientCount = clientCountMap.get(u.uid) || 0;
                   const supervisorObj = usersList.find((sup) => sup.uid === u.supervisorId);
+                  const presenceRec = presenceByUid[u.uid];
+                  const isUserOnline = presenceRec ? isPresenceActive(presenceRec, nowMs) : false;
 
                   return (
                     <tr key={u.uid} className="hover:bg-slate-800/40 transition">
                       <td className="p-3.5">
                         <div className="flex items-center gap-2.5">
-                          <div className="h-8 w-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white text-xs">
+                          <div className="relative h-8 w-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white text-xs shrink-0">
                             {u.fullName.slice(0, 2).toUpperCase()}
+                            <span
+                              className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-slate-900 ${
+                                isUserOnline ? 'bg-emerald-400' : 'bg-slate-600'
+                              }`}
+                              title={isUserOnline ? 'Conectado ahora' : 'Desconectado'}
+                            />
                           </div>
                           <div>
-                            <p className="font-bold text-white text-sm">{u.fullName}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-white text-sm">{u.fullName}</p>
+                              {isUserOnline && (
+                                <span className="text-[10px] font-bold text-emerald-400">
+                                  En línea
+                                </span>
+                              )}
+                            </div>
                             <p className="text-[11px] text-slate-400">{u.email}</p>
                             {u.username && <p className="text-[10px] text-slate-500 font-mono">@{u.username}</p>}
                           </div>

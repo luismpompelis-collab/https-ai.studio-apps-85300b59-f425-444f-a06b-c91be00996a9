@@ -12,6 +12,7 @@ import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, googleProvider, db } from '../lib/firebase';
 import { UserProfile, UserRole } from '../types';
 import { recordAuditLog } from '../lib/audit';
+import { writePresenceHeartbeat } from '../lib/presence';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -245,6 +246,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     if (userProfile) {
       recordAuditLog(userProfile, 'LOGIN', { changes: 'Cierre de sesión' });
+    }
+    if (auth.currentUser && userProfile) {
+      await writePresenceHeartbeat(
+        auth.currentUser.uid,
+        userProfile.fullName,
+        userProfile.role,
+        false
+      ).catch(() => {});
     }
     localStorage.setItem('logged_out_explicitly', 'true');
     localStorage.removeItem(DEMO_SESSION_KEY);

@@ -1,7 +1,19 @@
 import React, { useState } from 'react';
+import {
+  Map as GoogleMap,
+  AdvancedMarker,
+  Pin,
+  useApiLoadingStatus,
+  APILoadingStatus
+} from '@vis.gl/react-google-maps';
 import { MapPin, Navigation, ExternalLink, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
 import { GPSLocation } from '../types';
 import { formatDominicanDateTime } from '../lib/dominicanValidation';
+import {
+  GOOGLE_MAPS_API_KEY,
+  GMP_MAP_ID,
+  GMP_ATTRIBUTION_IDS
+} from '../lib/googleMaps';
 
 interface GPSCaptureProps {
   location: GPSLocation | null;
@@ -12,6 +24,7 @@ interface GPSCaptureProps {
 export const GPSCapture: React.FC<GPSCaptureProps> = ({ location, onLocationChange, disabled }) => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const apiStatus = useApiLoadingStatus();
 
   const captureGPS = () => {
     if (!navigator.geolocation) {
@@ -149,6 +162,36 @@ export const GPSCapture: React.FC<GPSCaptureProps> = ({ location, onLocationChan
               <p className="font-mono text-base font-bold text-white mt-0.5">{location.longitude.toFixed(6)}</p>
             </div>
           </div>
+
+          {GOOGLE_MAPS_API_KEY &&
+            apiStatus !== APILoadingStatus.FAILED &&
+            apiStatus !== APILoadingStatus.AUTH_FAILURE && (
+            <div className="h-52 w-full rounded-xl overflow-hidden border border-slate-800 shadow-inner">
+              <GoogleMap
+                key={`${location.latitude}-${location.longitude}`}
+                mapId={GMP_MAP_ID}
+                defaultCenter={{ lat: location.latitude, lng: location.longitude }}
+                defaultZoom={16}
+                gestureHandling="cooperative"
+                disableDefaultUI={false}
+                streetViewControl={false}
+                mapTypeControl={true}
+                internalUsageAttributionIds={GMP_ATTRIBUTION_IDS}
+                style={{ width: '100%', height: '100%' }}
+              >
+                <AdvancedMarker
+                  position={{ lat: location.latitude, lng: location.longitude }}
+                  title="Ubicación capturada del cliente"
+                >
+                  <Pin
+                    background="#2563eb"
+                    borderColor="#1e3a8a"
+                    glyphColor="#ffffff"
+                  />
+                </AdvancedMarker>
+              </GoogleMap>
+            </div>
+          )}
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-slate-400 pt-1 gap-2">
             <span>Hora captura: {formatDominicanDateTime(location.capturedAt)}</span>

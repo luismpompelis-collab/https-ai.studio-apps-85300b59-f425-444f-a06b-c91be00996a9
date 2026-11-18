@@ -62,6 +62,19 @@
         "device": { "type": "string", "maxLength": 150 }
       },
       "required": ["logId", "userId", "action", "timestamp"]
+    },
+    "Presence": {
+      "title": "Presence",
+      "description": "Real-time online connection status and heartbeat for team members",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 150 },
+        "role": { "type": "string", "enum": ["admin", "supervisor", "seller"] },
+        "isOnline": { "type": "boolean" },
+        "lastSeenAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "fullName", "role", "isOnline", "lastSeenAt"]
     }
   },
   "firestore": {
@@ -76,6 +89,10 @@
     "/audit_logs/{logId}": {
       "schema": "AuditLog",
       "description": "Immutable log entries of administrative and commercial actions"
+    },
+    "/presence/{userId}": {
+      "schema": "Presence",
+      "description": "Real-time presence heartbeat documents for connected supervisors and sellers"
     }
   }
 }
