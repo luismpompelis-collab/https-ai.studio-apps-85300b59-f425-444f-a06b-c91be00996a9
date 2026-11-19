@@ -28,10 +28,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateToClie
   const { allClients } = useSync();
   const { activeRole } = useAuth();
   const {
-    connectedSupervisors,
     connectedSellers,
-    totalConnectedTeam,
-    isLiveTracking,
+    totalConnectedSellers,
+    connectedAdmins,
     nowMs
   } = usePresence();
   const [timelinePeriod, setTimelinePeriod] = useState<'day' | 'week' | 'month'>('day');
@@ -177,7 +176,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateToClie
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-blue-400 bg-blue-950/60 border border-blue-800/80 px-2.5 py-0.5 rounded-md">
-                Panel Central
+                Panel del Administrador
               </span>
               <span className="text-xs text-slate-500">·</span>
               <span className="text-xs text-slate-400">Actualizado en tiempo real</span>
@@ -187,7 +186,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateToClie
               Métricas y Rendimiento Comercial
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              Supervisión de registros, vendedores y cobertura geográfica en República Dominicana
+              Control directo de registros, vendedores conectados y cobertura geográfica en República Dominicana
             </p>
           </div>
 
@@ -202,7 +201,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateToClie
         </div>
       </div>
 
-      {/* Live Connected Supervisors & Sellers (Admin Only) */}
+      {/* Live Connected Sellers (Direct Admin <-> Sellers Link) */}
       {activeRole === 'admin' && (
         <div className="bg-slate-900/80 border border-emerald-500/25 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800/80">
@@ -213,27 +212,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateToClie
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
-                  Conexión en Tiempo Real
+                  Conexión Directa en Tiempo Real
                 </span>
               </div>
               <h2 className="text-base sm:text-lg font-black text-white mt-1 flex items-center gap-2">
                 <Radio className="w-5 h-5 text-emerald-400" />
-                Personal Conectado (Supervisores y Vendedores)
+                Vendedores Conectados con el Administrador
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                {isLiveTracking
-                  ? 'Monitoreo en vivo de supervisores y vendedores activos en la plataforma'
-                  : 'Inicia sesión con tu cuenta de Google para sincronizar conexiones en vivo entre dispositivos'}
+                Monitoreo en vivo de cada vendedor activo y conectado directamente a tu panel administrativo
               </p>
             </div>
 
             <div className="flex items-center gap-3 bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-2.5 self-start sm:self-auto">
               <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Total Conectados
+                  Vendedores Conectados
                 </p>
                 <p className="text-2xl font-black text-emerald-400 font-mono tabular-nums leading-none mt-0.5">
-                  {totalConnectedTeam}
+                  {totalConnectedSellers}
                 </p>
               </div>
               <div className="h-9 w-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
@@ -243,25 +240,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateToClie
           </div>
 
           {/* Breakdown Counters */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 flex items-center justify-between">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  Supervisores Conectados
-                </p>
-                <p className="text-2xl font-extrabold text-emerald-400 font-mono tabular-nums mt-1">
-                  {connectedSupervisors.length}
-                </p>
-              </div>
-              <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400">
-                <Shield className="w-5 h-5" />
-              </div>
-            </div>
-
-            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  Vendedores Conectados
+                  Vendedores En Línea Ahora
                 </p>
                 <p className="text-2xl font-extrabold text-blue-400 font-mono tabular-nums mt-1">
                   {connectedSellers.length}
@@ -275,22 +258,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateToClie
             <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 flex items-center justify-between">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  Suma Equipo Activo
+                  Administradores En Línea
                 </p>
-                <p className="text-2xl font-extrabold text-white font-mono tabular-nums mt-1">
-                  {totalConnectedTeam}
+                <p className="text-2xl font-extrabold text-emerald-400 font-mono tabular-nums mt-1">
+                  {Math.max(1, connectedAdmins.length)}
                 </p>
               </div>
-              <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400">
-                <Radio className="w-5 h-5" />
+              <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400">
+                <Shield className="w-5 h-5" />
               </div>
             </div>
           </div>
 
-          {/* Active Team Members List */}
-          {totalConnectedTeam > 0 ? (
+          {/* Active Connected Sellers List */}
+          {connectedSellers.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
-              {[...connectedSupervisors, ...connectedSellers].map((person) => (
+              {connectedSellers.map((person) => (
                 <div
                   key={person.uid}
                   className="bg-slate-950/50 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2"
@@ -300,7 +283,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateToClie
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-white truncate">{person.fullName}</p>
                       <p className="text-[10px] text-slate-400">
-                        {person.role === 'supervisor' ? 'Supervisor' : 'Vendedor'}
+                        Vendedor · Conectado con Admin
                       </p>
                     </div>
                   </div>
@@ -312,7 +295,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateToClie
             </div>
           ) : (
             <p className="text-xs text-slate-500 italic">
-              No hay supervisores ni vendedores conectados en este momento.
+              No hay vendedores conectados en este momento. Cuando un vendedor inicie sesión aparecerá aquí al instante.
             </p>
           )}
         </div>

@@ -24,7 +24,7 @@ export function exportClientsToExcel(clients: ClientData[], filenamePrefix = 'Re
         : '',
       'Vendedor': c.sellerName,
       'ID Vendedor': c.sellerId,
-      'Supervisor': c.supervisorId || 'N/A',
+      'Administrador': c.adminId || 'Principal',
       'Fecha Creación': formatDominicanDateTime(c.createdAt),
       'Última Modificación': formatDominicanDateTime(c.updatedAt),
       'Tiene Foto Frente': c.cedulaFront ? 'SÍ (Expediente Digital)' : 'NO',
@@ -55,7 +55,7 @@ export function exportClientsToExcel(clients: ClientData[], filenamePrefix = 'Re
     { wch: 35 }, // Google Maps Link
     { wch: 25 }, // Vendedor
     { wch: 20 }, // ID Vendedor
-    { wch: 16 }, // Supervisor
+    { wch: 18 }, // Administrador
     { wch: 20 }, // Fecha Creación
     { wch: 20 }, // Última Modificación
     { wch: 18 }, // Foto Frente

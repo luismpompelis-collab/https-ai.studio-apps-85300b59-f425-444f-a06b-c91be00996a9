@@ -2,20 +2,38 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile containing authentication and role-based permissions",
+      "description": "User profile containing authentication and role-based permissions for Administrator and Sellers",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
         "fullName": { "type": "string", "maxLength": 150 },
         "username": { "type": "string", "maxLength": 60 },
         "email": { "type": "string", "maxLength": 120 },
-        "role": { "type": "string", "enum": ["admin", "supervisor", "seller"] },
-        "supervisorId": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "enum": ["admin", "seller"] },
+        "adminId": { "type": "string", "maxLength": 128 },
+        "adminName": { "type": "string", "maxLength": 150 },
         "active": { "type": "boolean" },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
       },
       "required": ["uid", "fullName", "email", "role", "active"]
+    },
+    "SellerInvite": {
+      "title": "SellerInvite",
+      "description": "Admin-provisioned seller profile linked by email for cross-device Google Sign-In claiming",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 150 },
+        "username": { "type": "string", "maxLength": 60 },
+        "email": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["seller"] },
+        "adminId": { "type": "string", "maxLength": 128 },
+        "adminName": { "type": "string", "maxLength": 150 },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["fullName", "email", "role", "adminId", "active"]
     },
     "Client": {
       "title": "Client",
@@ -39,7 +57,7 @@
         "capturedAt": { "type": "string", "maxLength": 50 },
         "sellerId": { "type": "string", "maxLength": 128 },
         "sellerName": { "type": "string", "maxLength": 150 },
-        "supervisorId": { "type": "string", "maxLength": 128 },
+        "adminId": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" },
         "syncStatus": { "type": "string", "enum": ["synced", "pending", "syncing"] },
@@ -65,12 +83,12 @@
     },
     "Presence": {
       "title": "Presence",
-      "description": "Real-time online connection status and heartbeat for team members",
+      "description": "Real-time online connection status and heartbeat for Administrator and Sellers",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
         "fullName": { "type": "string", "maxLength": 150 },
-        "role": { "type": "string", "enum": ["admin", "supervisor", "seller"] },
+        "role": { "type": "string", "enum": ["admin", "seller"] },
         "isOnline": { "type": "boolean" },
         "lastSeenAt": { "type": "string", "format": "date-time" }
       },
@@ -80,7 +98,11 @@
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "Collection of user accounts and permissions"
+      "description": "Collection of Administrator and Seller user accounts"
+    },
+    "/seller_invites/{inviteId}": {
+      "schema": "SellerInvite",
+      "description": "Admin-created seller invitations claimed on Google Sign-In"
     },
     "/clients/{clientId}": {
       "schema": "Client",
@@ -92,7 +114,7 @@
     },
     "/presence/{userId}": {
       "schema": "Presence",
-      "description": "Real-time presence heartbeat documents for connected supervisors and sellers"
+      "description": "Real-time presence heartbeat documents for connected Administrator and Sellers"
     }
   }
 }

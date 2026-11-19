@@ -81,7 +81,6 @@ export const ClientDossierModal: React.FC<ClientDossierModalProps> = ({
 
   const canEdit =
     activeRole === 'admin' ||
-    (activeRole === 'supervisor' && client.supervisorId === userProfile?.uid) ||
     client.sellerId === userProfile?.uid;
 
   const canDelete = activeRole === 'admin' || client.sellerId === userProfile?.uid;

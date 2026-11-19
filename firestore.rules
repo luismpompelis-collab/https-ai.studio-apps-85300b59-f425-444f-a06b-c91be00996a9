@@ -32,9 +32,11 @@ service cloud.firestore {
       );
     }
 
-    function isSupervisor() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        getUserDoc().role == 'supervisor' && getUserDoc().active == true;
+    function isActiveSeller() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        getUserDoc().role == 'seller' &&
+        getUserDoc().active == true;
     }
 
     function isValidPresence(data, userId) {
@@ -42,7 +44,7 @@ service cloud.firestore {
         data.keys().hasOnly(['uid', 'fullName', 'role', 'isOnline', 'lastSeenAt']) &&
         data.uid is string && data.uid == userId && data.uid == request.auth.uid &&
         data.fullName is string && data.fullName.size() > 0 && data.fullName.size() <= 150 &&
-        data.role in ['admin', 'supervisor', 'seller'] &&
+        data.role in ['admin', 'seller'] &&
         data.isOnline is bool &&
         data.lastSeenAt == request.time;
     }
@@ -53,43 +55,80 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
 
-    // Users Collection
+    // Users Collection (PII restricted to owner or Admin)
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && (isAdmin() || request.auth.uid == userId);
-      allow update: if isSignedIn() && (isAdmin() || request.auth.uid == userId);
-      allow delete: if isAdmin();
+      allow get: if isSignedIn() && isValidId(userId) && (isAdmin() || request.auth.uid == userId);
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && isValidId(userId) && (
+        isAdmin() ||
+        (request.auth.uid == userId &&
+         request.resource.data.uid == userId &&
+         request.resource.data.role == 'seller' &&
+         request.resource.data.active == true)
+      );
+      allow update: if isSignedIn() && isValidId(userId) && (
+        isAdmin() ||
+        (request.auth.uid == userId &&
+         request.resource.data.uid == resource.data.uid &&
+         request.resource.data.role == resource.data.role &&
+         request.resource.data.active == resource.data.active)
+      );
+      allow delete: if isAdmin() && isValidId(userId);
     }
 
-    // Clients Collection
+    // Seller Invites Collection (Admin creates, Seller claims matching email on Google Sign-In)
+    match /seller_invites/{inviteId} {
+      allow get: if isSignedIn() && isValidId(inviteId) && (
+        isAdmin() ||
+        (request.auth.token.email != null &&
+         resource.data.email == request.auth.token.email.lower())
+      );
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(inviteId) &&
+        request.resource.data.email is string &&
+        request.resource.data.fullName is string &&
+        request.resource.data.role == 'seller' &&
+        request.resource.data.active is bool;
+      allow delete: if isAdmin() && isValidId(inviteId);
+    }
+
+    // Clients Collection (Direct Admin <-> Seller ownership)
     match /clients/{clientId} {
       allow read: if isSignedIn() && (
         isAdmin() ||
-        isSupervisor() ||
-        (resource.data.sellerId == request.auth.uid)
+        resource.data.sellerId == request.auth.uid
       );
       allow create: if isSignedIn() && (
-        request.resource.data.sellerId == request.auth.uid || isAdmin()
+        isAdmin() ||
+        (isActiveSeller() && request.resource.data.sellerId == request.auth.uid)
       );
       allow update: if isSignedIn() && (
         isAdmin() ||
-        (resource.data.sellerId == request.auth.uid) ||
-        (isSupervisor() && resource.data.supervisorId == request.auth.uid)
+        (isActiveSeller() &&
+         resource.data.sellerId == request.auth.uid &&
+         request.resource.data.sellerId == resource.data.sellerId)
       );
-      allow delete: if isAdmin() || (isSignedIn() && resource.data.sellerId == request.auth.uid);
+      allow delete: if isAdmin() || (isActiveSeller() && resource.data.sellerId == request.auth.uid);
     }
 
     // Audit Logs Collection (Append-only)
     match /audit_logs/{logId} {
-      allow read: if isAdmin() || isSupervisor();
+      allow read: if isAdmin();
       allow create: if isSignedIn();
       allow update, delete: if false;
     }
 
-    // Real-time Team Presence Collection
+    // Real-time Admin <-> Seller Presence Collection
     match /presence/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin();
+      allow get: if isSignedIn() && isValidId(userId) && (
+        request.auth.uid == userId ||
+        isAdmin() ||
+        resource.data.role == 'admin'
+      );
+      allow list: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.role == 'admin'
+      );
       allow create, update: if isSignedIn() && isValidId(userId) &&
         request.auth.uid == userId &&
         isValidPresence(request.resource.data, userId) && (

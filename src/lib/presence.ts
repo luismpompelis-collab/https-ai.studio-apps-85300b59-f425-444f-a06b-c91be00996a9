@@ -2,8 +2,10 @@ import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { PresenceRecord, UserRole } from '../types';
 
-export const PRESENCE_HEARTBEAT_MS = 40_000;
-export const PRESENCE_TIMEOUT_MS = 120_000;
+export const PRESENCE_HEARTBEAT_MS = 20_000;
+export const PRESENCE_TIMEOUT_MS = 90_000;
+export const LOCAL_PRESENCE_KEY = 'clientes_pro_local_presence';
+export const PRESENCE_CHANNEL_NAME = 'clientes_pro_presence';
 
 export async function writePresenceHeartbeat(
   uid: string,
@@ -20,6 +22,49 @@ export async function writePresenceHeartbeat(
     isOnline,
     lastSeenAt: serverTimestamp()
   });
+}
+
+export function readLocalPresenceRecords(): PresenceRecord[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_PRESENCE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Record<string, PresenceRecord>;
+    if (!parsed || typeof parsed !== 'object') return [];
+    return Object.values(parsed).filter((rec) => rec && (rec.role === 'admin' || rec.role === 'seller'));
+  } catch {
+    return [];
+  }
+}
+
+export function writeLocalPresenceHeartbeat(
+  uid: string,
+  fullName: string,
+  role: UserRole,
+  isOnline: boolean,
+  adminId?: string | null
+): void {
+  if (!uid) return;
+  try {
+    const raw = localStorage.getItem(LOCAL_PRESENCE_KEY);
+    const map: Record<string, PresenceRecord> = raw ? JSON.parse(raw) : {};
+    map[uid] = {
+      uid,
+      fullName: (fullName || 'Usuario').trim().slice(0, 150) || 'Usuario',
+      role,
+      isOnline,
+      lastSeenAt: Date.now(),
+      adminId: adminId || null
+    };
+    localStorage.setItem(LOCAL_PRESENCE_KEY, JSON.stringify(map));
+
+    if (typeof BroadcastChannel !== 'undefined') {
+      const ch = new BroadcastChannel(PRESENCE_CHANNEL_NAME);
+      ch.postMessage({ type: 'presence_updated', uid, isOnline, ts: Date.now() });
+      ch.close();
+    }
+  } catch {
+    // Ignore localStorage / BroadcastChannel errors
+  }
 }
 
 export function getLastSeenMillis(lastSeenAt: unknown): number {

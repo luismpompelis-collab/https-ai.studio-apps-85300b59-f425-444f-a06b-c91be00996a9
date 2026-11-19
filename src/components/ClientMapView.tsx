@@ -275,8 +275,8 @@ export const ClientMapView: React.FC<ClientMapViewProps> = ({ onSelectClient }) 
             />
           </div>
 
-          {/* Seller Filter (Admin / Supervisor) */}
-          {activeRole !== 'seller' && (
+          {/* Seller Filter (Admin only) */}
+          {activeRole === 'admin' && (
             <div>
               <select
                 value={selectedSeller}

@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'supervisor' | 'seller';
+export type UserRole = 'admin' | 'seller';
 
 export interface UserProfile {
   uid: string;
@@ -6,7 +6,8 @@ export interface UserProfile {
   username: string;
   email: string;
   role: UserRole;
-  supervisorId?: string | null;
+  adminId?: string | null;
+  adminName?: string | null;
   active: boolean;
   phone?: string;
   createdAt: string;
@@ -19,6 +20,7 @@ export interface PresenceRecord {
   role: UserRole;
   isOnline: boolean;
   lastSeenAt: unknown;
+  adminId?: string | null;
 }
 
 export type SyncStatus = 'synced' | 'pending' | 'syncing' | 'failed';
@@ -61,7 +63,7 @@ export interface ClientData {
   capturedAt: string | null;
   sellerId: string;
   sellerName: string;
-  supervisorId?: string | null;
+  adminId?: string | null;
   createdAt: string;
   updatedAt: string;
   syncStatus: SyncStatus;
@@ -97,7 +99,6 @@ export interface PendingSyncItem {
 export interface ClientFilter {
   searchQuery: string;
   sellerId: string;
-  supervisorId: string;
   sector: string;
   startDate: string;
   endDate: string;

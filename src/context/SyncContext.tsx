@@ -9,9 +9,11 @@ import {
 } from '../lib/idb';
 import { ClientData, PendingSyncItem } from '../types';
 import { db, stripUndefined } from '../lib/firebase';
-import { doc, setDoc, getDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { recordAuditLog } from '../lib/audit';
 import { useAuth } from './AuthContext';
+
+const CLIENTS_SYNC_CHANNEL = 'clientes_pro_clients_sync';
 
 interface SyncContextType {
   isOnline: boolean;
@@ -28,6 +30,18 @@ interface SyncContextType {
 }
 
 const SyncContext = createContext<SyncContextType | undefined>(undefined);
+
+function broadcastClientsUpdated(clientId?: string) {
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const ch = new BroadcastChannel(CLIENTS_SYNC_CHANNEL);
+      ch.postMessage({ type: 'clients_updated', clientId, ts: Date.now() });
+      ch.close();
+    }
+  } catch {
+    // Ignore BroadcastChannel errors
+  }
+}
 
 function getInitialSampleClients(): ClientData[] {
   const now = Date.now();
@@ -46,9 +60,9 @@ function getInitialSampleClients(): ClientData[] {
       longitude: -69.932450,
       accuracy: 4.2,
       capturedAt: new Date(now - 3600000 * 5).toISOString(),
-      sellerId: 'demo_seller_carlos',
+      sellerId: 'sample_seller_carlos',
       sellerName: 'Carlos Manuel Gómez',
-      supervisorId: 'demo_supervisor_roberto',
+      adminId: 'admin_luis_owner',
       createdAt: new Date(now - 3600000 * 5).toISOString(),
       updatedAt: new Date(now - 3600000 * 5).toISOString(),
       syncStatus: 'synced'
@@ -66,9 +80,9 @@ function getInitialSampleClients(): ClientData[] {
       longitude: -69.954120,
       accuracy: 6.8,
       capturedAt: new Date(now - 86400000 * 2).toISOString(),
-      sellerId: 'demo_seller_carlos',
+      sellerId: 'sample_seller_carlos',
       sellerName: 'Carlos Manuel Gómez',
-      supervisorId: 'demo_supervisor_roberto',
+      adminId: 'admin_luis_owner',
       createdAt: new Date(now - 86400000 * 2).toISOString(),
       updatedAt: new Date(now - 86400000 * 2).toISOString(),
       syncStatus: 'synced'
@@ -86,9 +100,9 @@ function getInitialSampleClients(): ClientData[] {
       longitude: -70.672340,
       accuracy: 5.1,
       capturedAt: new Date(now - 86400000 * 4).toISOString(),
-      sellerId: 'demo_seller_carlos',
+      sellerId: 'sample_seller_carlos',
       sellerName: 'Carlos Manuel Gómez',
-      supervisorId: 'demo_supervisor_roberto',
+      adminId: 'admin_luis_owner',
       createdAt: new Date(now - 86400000 * 4).toISOString(),
       updatedAt: new Date(now - 86400000 * 4).toISOString(),
       syncStatus: 'synced'
@@ -107,7 +121,6 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [allClients, setAllClients] = useState<ClientData[]>([]);
   const [loadingClients, setLoadingClients] = useState<boolean>(true);
 
-  // Update pending queue status
   const updatePendingState = useCallback(async () => {
     try {
       const items = await getPendingSyncItems();
@@ -118,17 +131,38 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const loadLocalClientsForActiveUser = useCallback(async () => {
+    let cached = await getCachedClients();
+    const localPending = await getPendingSyncItems();
+    const mergedMap = new Map<string, ClientData>();
+    cached.forEach((c) => mergedMap.set(c.clientId, c));
+    localPending.forEach((p) => mergedMap.set(p.clientId, p.clientData));
+
+    let localClients = Array.from(mergedMap.values());
+    if (localClients.length === 0) {
+      localClients = getInitialSampleClients();
+      await cacheClientsLocally(localClients);
+    }
+
+    if (userProfile && activeRole === 'seller') {
+      const sellerOnly = localClients.filter((c) => c.sellerId === userProfile.uid);
+      sellerOnly.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setAllClients(sellerOnly);
+    } else {
+      localClients.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setAllClients(localClients);
+    }
+  }, [userProfile, activeRole]);
+
   // Fetch or sync all clients from Firestore (when authenticated) or IndexedDB
   const refreshClients = useCallback(async () => {
     setLoadingClients(true);
     try {
       if (isOnline && currentUser && userProfile) {
-        let q;
-        if (activeRole === 'admin' || activeRole === 'supervisor') {
-          q = collection(db, 'clients');
-        } else {
-          q = query(collection(db, 'clients'), where('sellerId', '==', currentUser.uid));
-        }
+        const q =
+          activeRole === 'admin'
+            ? collection(db, 'clients')
+            : query(collection(db, 'clients'), where('sellerId', '==', currentUser.uid));
 
         const snapshot = await getDocs(q);
         const remoteClients: ClientData[] = [];
@@ -136,60 +170,93 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
           remoteClients.push(docSnap.data() as ClientData);
         });
 
-        // Merge with locally pending clients that haven't reached server yet
         const localPending = await getPendingSyncItems();
-        const pendingMap = new Map(localPending.map((p) => [p.clientId, p.clientData]));
+        const cachedLocal = await getCachedClients();
 
         const mergedMap = new Map<string, ClientData>();
+        // Preserve any locally created seller records in same browser for Admin view
+        if (activeRole === 'admin') {
+          cachedLocal.forEach((c) => mergedMap.set(c.clientId, c));
+        }
         remoteClients.forEach((c) => mergedMap.set(c.clientId, c));
-        pendingMap.forEach((c, id) => mergedMap.set(id, c));
+        localPending.forEach((p) => mergedMap.set(p.clientId, p.clientData));
 
         let finalClients = Array.from(mergedMap.values());
-        if (finalClients.length === 0) {
+        if (finalClients.length === 0 && activeRole === 'admin') {
           finalClients = getInitialSampleClients();
         }
 
         finalClients.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setAllClients(finalClients);
-        await cacheClientsLocally(finalClients);
+        if (activeRole === 'admin' && finalClients.length > 0) {
+          await cacheClientsLocally(finalClients);
+        }
       } else {
-        // Local IndexedDB mode (offline or instant workspace without Firebase Auth session)
-        let cached = await getCachedClients();
-        const localPending = await getPendingSyncItems();
-        const mergedMap = new Map<string, ClientData>();
-        cached.forEach((c) => mergedMap.set(c.clientId, c));
-        localPending.forEach((p) => mergedMap.set(p.clientId, p.clientData));
-
-        let localClients = Array.from(mergedMap.values());
-        if (localClients.length === 0) {
-          localClients = getInitialSampleClients();
-          await cacheClientsLocally(localClients);
-        }
-
-        if (userProfile && activeRole === 'seller') {
-          const sellerOnly = localClients.filter(
-            (c) => c.sellerId === userProfile.uid || c.sellerId === 'demo_seller_carlos'
-          );
-          sellerOnly.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          setAllClients(sellerOnly);
-        } else {
-          localClients.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          setAllClients(localClients);
-        }
+        await loadLocalClientsForActiveUser();
       }
     } catch (err) {
       console.warn('Error fetching clients, falling back to local DB:', err);
-      let cached = await getCachedClients();
-      if (cached.length === 0) {
-        cached = getInitialSampleClients();
-        await cacheClientsLocally(cached).catch(() => {});
-      }
-      cached.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setAllClients(cached);
+      await loadLocalClientsForActiveUser().catch(() => {});
     } finally {
       setLoadingClients(false);
     }
+  }, [isOnline, currentUser, userProfile, activeRole, loadLocalClientsForActiveUser]);
+
+  // Real-time Firestore listener so Admin receives Seller clients live across devices
+  useEffect(() => {
+    if (!isOnline || !currentUser || !userProfile) return;
+
+    const q =
+      activeRole === 'admin'
+        ? collection(db, 'clients')
+        : query(collection(db, 'clients'), where('sellerId', '==', currentUser.uid));
+
+    const unsubscribe = onSnapshot(
+      q,
+      async (snapshot) => {
+        const remoteClients: ClientData[] = [];
+        snapshot.forEach((docSnap) => {
+          remoteClients.push(docSnap.data() as ClientData);
+        });
+
+        const localPending = await getPendingSyncItems();
+        const cachedLocal = activeRole === 'admin' ? await getCachedClients() : [];
+        const mergedMap = new Map<string, ClientData>();
+        cachedLocal.forEach((c) => mergedMap.set(c.clientId, c));
+        remoteClients.forEach((c) => mergedMap.set(c.clientId, c));
+        localPending.forEach((p) => mergedMap.set(p.clientId, p.clientData));
+
+        const finalClients = Array.from(mergedMap.values());
+        finalClients.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setAllClients(finalClients);
+        setLoadingClients(false);
+      },
+      (err) => {
+        console.warn('Error en suscripción en vivo de clientes:', err);
+      }
+    );
+
+    return () => unsubscribe();
   }, [isOnline, currentUser, userProfile, activeRole]);
+
+  // Real-time cross-tab BroadcastChannel listener so Admin sees newly registered Seller clients instantly
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        channel = new BroadcastChannel(CLIENTS_SYNC_CHANNEL);
+        channel.onmessage = () => {
+          loadLocalClientsForActiveUser().catch(() => {});
+        };
+      }
+    } catch {
+      channel = null;
+    }
+
+    return () => {
+      if (channel) channel.close();
+    };
+  }, [loadLocalClientsForActiveUser]);
 
   // Execute synchronization queue (only writes to Firestore when authenticated)
   const processSyncQueue = useCallback(async () => {
@@ -211,7 +278,6 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const clientRef = doc(db, 'clients', item.clientId);
 
-        // Normalize sellerId if item was created before signing in
         const normalizedSellerId =
           !item.clientData.sellerId ||
           item.clientData.sellerId === 'offline-seller' ||
@@ -251,6 +317,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         await removePendingSyncItem(item.id);
+        broadcastClientsUpdated(item.clientId);
 
         if (userProfile) {
           recordAuditLog(userProfile, 'SINCRONIZAR', {
@@ -284,17 +351,19 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const canSyncNow = navigator.onLine && Boolean(currentUser);
     const cleanData = stripUndefined({
       ...clientData,
-      syncStatus: (canSyncNow ? 'syncing' : 'pending') as ClientData['syncStatus']
+      syncStatus: (canSyncNow ? 'syncing' : isOnline ? 'synced' : 'pending') as ClientData['syncStatus']
     });
     delete cleanData.syncError;
 
-    // If working in instant local workspace (no Firebase Auth session yet), persist cleanly in IndexedDB without queuing failed auth errors
+    // If working via Admin-created credentials or local workspace without Firebase Auth session,
+    // persist cleanly in IndexedDB and notify the Admin tab in real time
     if (!currentUser) {
       const localRecord: ClientData = {
         ...cleanData,
-        syncStatus: 'pending'
+        syncStatus: isOnline ? 'synced' : 'pending'
       };
       await saveCachedClient(localRecord);
+      broadcastClientsUpdated(localRecord.clientId);
       setAllClients((prev) => {
         const idx = prev.findIndex((c) => c.clientId === localRecord.clientId);
         if (idx >= 0) {
@@ -318,6 +387,8 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     await savePendingSync(pendingItem);
+    await saveCachedClient(cleanData);
+    broadcastClientsUpdated(clientData.clientId);
     await updatePendingState();
 
     setAllClients((prev) => {

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
-import { ClientData, GPSLocation } from '../types';
+import { usePresence } from '../context/PresenceContext';
+import { ClientData, GPSLocation, ClientStage } from '../types';
 import {
   formatCedula,
   validateDominicanCedula,
@@ -12,7 +13,6 @@ import {
 import { CameraCapture } from './CameraCapture';
 import { GPSCapture } from './GPSCapture';
 import { recordAuditLog } from '../lib/audit';
-import { ClientStage } from '../types';
 import { sharePlanillaViaWhatsApp } from '../lib/whatsappExport';
 import { generateClientPDF } from '../lib/pdfExport';
 import {
@@ -20,10 +20,7 @@ import {
   Send,
   AlertCircle,
   CheckCircle2,
-  Phone,
-  MapPin,
   Building2,
-  FileText,
   Camera,
   Edit3,
   Wifi,
@@ -32,7 +29,7 @@ import {
   Share2,
   FileDown,
   ArrowRight,
-  X
+  Link2
 } from 'lucide-react';
 
 interface ClientFormProps {
@@ -42,8 +39,12 @@ interface ClientFormProps {
 }
 
 export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess, onCancel }) => {
-  const { userProfile } = useAuth();
+  const { userProfile, activeRole } = useAuth();
   const { enqueueClient, allClients, isOnline } = useSync();
+  const { isAdminOnline, connectedAdmins } = usePresence();
+
+  const linkedAdminName =
+    connectedAdmins[0]?.fullName || userProfile?.adminName || 'Administrador';
 
   // Mode: 'photo' (Modalidad 1) vs 'manual' (Modalidad 2)
   const [mode, setMode] = useState<'photo' | 'manual'>('photo');
@@ -217,7 +218,10 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
       capturedAt: gpsLocation ? gpsLocation.capturedAt : null,
       sellerId: initialClient?.sellerId || userProfile?.uid || 'offline-seller',
       sellerName: initialClient?.sellerName || userProfile?.fullName || 'Vendedor Comercial',
-      supervisorId: initialClient?.supervisorId || userProfile?.supervisorId || null,
+      adminId:
+        initialClient?.adminId ||
+        userProfile?.adminId ||
+        (userProfile?.role === 'admin' ? userProfile.uid : 'admin_luis_owner'),
       createdAt: initialClient?.createdAt || now,
       updatedAt: now,
       syncStatus: isOnline ? 'syncing' : 'pending'
@@ -272,6 +276,46 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
 
   return (
     <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-6 pb-20">
+      {/* Personalized Seller Identity & Admin Connection Banner */}
+      {activeRole === 'seller' && userProfile && (
+        <div className="bg-gradient-to-r from-blue-950/80 via-slate-900 to-slate-900 border border-blue-800/60 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="h-12 w-12 rounded-2xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-300 font-black text-lg shrink-0">
+              {userProfile.fullName.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-blue-400">
+                Sesión de Vendedor Activa
+              </p>
+              <h2 className="text-lg sm:text-xl font-black text-white leading-tight">
+                {userProfile.fullName}
+              </h2>
+              <p className="text-xs text-slate-400">
+                @{userProfile.username} · Cada cliente que registres se sincronizará con tu nombre
+              </p>
+            </div>
+          </div>
+
+          <div
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-bold self-start sm:self-auto ${
+              isAdminOnline
+                ? 'bg-emerald-950/60 border-emerald-700/70 text-emerald-300'
+                : 'bg-blue-950/60 border-blue-700/70 text-blue-200'
+            }`}
+          >
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                isAdminOnline ? 'bg-emerald-400 animate-pulse' : 'bg-blue-400'
+              }`}
+            />
+            <Link2 className="w-3.5 h-3.5" />
+            <span>
+              Conectado con Administrador ({linkedAdminName})
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Title & Mode Switcher */}
       <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-6 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -623,7 +667,7 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
             <div>
               <h2 className="text-xl font-black text-white">¡Cliente Registrado con Éxito!</h2>
               <p className="text-xs text-slate-300 mt-1">
-                Los datos fueron transmitidos a la Base de Datos Central. Tu Supervisor y el Administrador ya tienen acceso a este expediente en sus paneles.
+                Los datos fueron transmitidos a la Base de Datos Central. El Administrador ya tiene acceso a este expediente en su panel.
               </p>
             </div>
 
@@ -631,6 +675,9 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
               <p className="font-bold text-white text-sm">{registeredClientForShare.fullName}</p>
               <p className="text-slate-400 font-mono">Cédula: {registeredClientForShare.cedula}</p>
               <p className="text-slate-400">Sector: {registeredClientForShare.sector}</p>
+              <p className="text-blue-300 text-[11px] font-semibold">
+                Registrado por: {registeredClientForShare.sellerName}
+              </p>
               {registeredClientForShare.latitude && (
                 <p className="text-emerald-400 font-mono text-[11px]">
                   GPS Satelital: {registeredClientForShare.latitude.toFixed(6)}, {registeredClientForShare.longitude?.toFixed(6)}
@@ -643,14 +690,14 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
                 ¿Deseas enviar la planilla por WhatsApp?
               </p>
 
-              {/* Share to Supervisor/Admin */}
+              {/* Share to Admin */}
               <button
                 type="button"
                 onClick={() => sharePlanillaViaWhatsApp(registeredClientForShare)}
                 className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
               >
                 <MessageCircle className="w-4 h-4" />
-                <span>Enviar Planilla a Supervisor / Admin por WhatsApp</span>
+                <span>Enviar Planilla al Administrador por WhatsApp</span>
               </button>
 
               {/* Share to Customer */}

@@ -6,21 +6,24 @@ import {
   Eye,
   EyeOff,
   UserCheck,
-  Shield,
-  Key,
   AlertCircle,
   CheckCircle2
 } from 'lucide-react';
-import { UserRole } from '../types';
 
 export const AuthModal: React.FC = () => {
-  const { loginWithGoogle, loginWithEmail, registerWithEmail, resetPassword } = useAuth();
+  const {
+    loginWithGoogle,
+    loginWithEmail,
+    registerWithEmail,
+    resetPassword,
+    sessionNotice,
+    clearSessionNotice
+  } = useAuth();
 
   const [tab, setTab] = useState<'login' | 'register' | 'forgot'>('login');
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [role, setRole] = useState<UserRole>('seller');
   const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -31,33 +34,35 @@ export const AuthModal: React.FC = () => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
+    clearSessionNotice();
     setLoading(true);
 
     try {
       if (tab === 'login') {
-        // Allow email or username (if no @, append @clientespro.do)
-        const cleanEmail = email.includes('@') ? email.trim() : `${email.trim().toLowerCase()}@clientespro.do`;
-        await loginWithEmail(cleanEmail, password);
+        await loginWithEmail(identifier.trim(), password);
       } else if (tab === 'register') {
         if (!fullName.trim()) {
-          setErrorMsg('El nombre completo es requerido');
+          setErrorMsg('El nombre completo es requerido.');
           setLoading(false);
           return;
         }
-        const cleanEmail = email.includes('@') ? email.trim() : `${email.trim().toLowerCase()}@clientespro.do`;
-        await registerWithEmail(cleanEmail, password, fullName.trim(), role);
+        if (password.length < 6) {
+          setErrorMsg('La contraseña debe tener al menos 6 caracteres.');
+          setLoading(false);
+          return;
+        }
+        await registerWithEmail(identifier.trim(), password, fullName.trim());
       } else if (tab === 'forgot') {
-        if (!email.trim()) {
+        if (!identifier.trim()) {
           setErrorMsg('Por favor ingresa tu correo electrónico para enviarte el enlace.');
           setLoading(false);
           return;
         }
-        await resetPassword(email.trim());
+        await resetPassword(identifier.trim());
         setSuccessMsg('Enlace de recuperación enviado. Revisa tu bandeja de entrada.');
       }
     } catch (err: any) {
-      console.error('Auth error:', err);
-      let msg = err.message || 'Error de autenticación';
+      let msg = err?.message || 'Error de autenticación';
       if (msg.includes('user-not-found') || msg.includes('invalid-credential')) {
         msg = 'Credenciales incorrectas o usuario no registrado.';
       } else if (msg.includes('wrong-password')) {
@@ -75,15 +80,18 @@ export const AuthModal: React.FC = () => {
 
   const handleGoogleLogin = async () => {
     setErrorMsg(null);
+    clearSessionNotice();
     setLoading(true);
     try {
       await loginWithGoogle();
     } catch (err: any) {
-      setErrorMsg(err.message || 'No se pudo iniciar sesión con Google.');
+      setErrorMsg(err?.message || 'No se pudo iniciar sesión con Google.');
     } finally {
       setLoading(false);
     }
   };
+
+  const displayedError = errorMsg || sessionNotice;
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4">
@@ -101,7 +109,7 @@ export const AuthModal: React.FC = () => {
             CLIENTES <span className="text-blue-400">PRO</span>
           </h1>
           <p className="text-xs text-slate-400">
-            Sistema Profesional de Registro y Gestión Comercial
+            Acceso para Administrador y Vendedores Comerciales
           </p>
         </div>
 
@@ -131,16 +139,16 @@ export const AuthModal: React.FC = () => {
               tab === 'register' ? 'text-blue-400' : 'text-slate-400 hover:text-white'
             }`}
           >
-            Crear Cuenta
+            Registro de Vendedor
             {tab === 'register' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500" />}
           </button>
         </div>
 
         {/* Feedback alerts */}
-        {errorMsg && (
+        {displayedError && (
           <div className="mb-4 p-3 bg-red-950/70 border border-red-800 text-red-300 rounded-xl text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{errorMsg}</span>
+            <span>{displayedError}</span>
           </div>
         )}
 
@@ -181,7 +189,9 @@ export const AuthModal: React.FC = () => {
 
         <div className="relative flex py-2 items-center mb-4">
           <div className="flex-grow border-t border-slate-800"></div>
-          <span className="flex-shrink mx-3 text-slate-500 text-[11px] uppercase font-bold tracking-wider">o con credenciales</span>
+          <span className="flex-shrink mx-3 text-slate-500 text-[11px] uppercase font-bold tracking-wider">
+            o con credenciales asignadas
+          </span>
           <div className="flex-grow border-t border-slate-800"></div>
         </div>
 
@@ -196,7 +206,7 @@ export const AuthModal: React.FC = () => {
                   type="text"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Ej: Lic. Carlos Medina"
+                  placeholder="Ej: Carlos Ramírez"
                   className="w-full pl-9 pr-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-xs placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 />
@@ -206,15 +216,15 @@ export const AuthModal: React.FC = () => {
 
           <div>
             <label className="block text-slate-300 font-bold uppercase mb-1">
-              {tab === 'login' ? 'Correo o Nombre de Usuario *' : 'Correo Electrónico *'}
+              {tab === 'login' ? 'Usuario o Correo Electrónico *' : 'Correo Electrónico *'}
             </label>
             <div className="relative">
               <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="usuario@clientespro.do"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder={tab === 'login' ? 'ej: cramirez o carlos@clientespro.do' : 'vendedor@clientespro.do'}
                 className="w-full pl-9 pr-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-xs placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
               />
@@ -260,18 +270,9 @@ export const AuthModal: React.FC = () => {
           )}
 
           {tab === 'register' && (
-            <div>
-              <label className="block text-slate-300 font-bold uppercase mb-1">Rol Inicial</label>
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value as UserRole)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white text-xs"
-              >
-                <option value="seller">Vendedor Comercial</option>
-                <option value="supervisor">Supervisor de Equipo</option>
-                <option value="admin">Administrador General</option>
-              </select>
-            </div>
+            <p className="text-[11px] text-slate-400 bg-slate-800/60 border border-slate-700/70 rounded-xl p-2.5">
+              Tu cuenta se creará como <strong className="text-blue-300">Vendedor Comercial</strong> y quedará conectada automáticamente con el Administrador.
+            </p>
           )}
 
           <button
@@ -284,7 +285,7 @@ export const AuthModal: React.FC = () => {
             ) : tab === 'login' ? (
               'Iniciar Sesión'
             ) : tab === 'register' ? (
-              'Crear Cuenta Comercial'
+              'Crear Cuenta de Vendedor'
             ) : (
               'Enviar Enlace de Recuperación'
             )}

@@ -39,7 +39,6 @@ export const ClientList: React.FC<ClientListProps> = ({ onSelectClient, onEditCl
   const [filters, setFilters] = useState<ClientFilter>({
     searchQuery: '',
     sellerId: '',
-    supervisorId: '',
     sector: '',
     startDate: '',
     endDate: '',
@@ -51,7 +50,7 @@ export const ClientList: React.FC<ClientListProps> = ({ onSelectClient, onEditCl
   const [showFilters, setShowFilters] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Distinct sellers and supervisors for filter dropdowns
+  // Distinct sellers for filter dropdown
   const distinctSellers = useMemo(() => {
     const map = new Map<string, string>();
     allClients.forEach((c) => {
@@ -77,9 +76,6 @@ export const ClientList: React.FC<ClientListProps> = ({ onSelectClient, onEditCl
       // Role scope check
       if (activeRole === 'seller' && client.sellerId !== userProfile?.uid) {
         return false;
-      }
-      if (activeRole === 'supervisor' && client.supervisorId && client.supervisorId !== userProfile?.uid) {
-        // Can view own team
       }
 
       // Deleted state
@@ -251,8 +247,8 @@ export const ClientList: React.FC<ClientListProps> = ({ onSelectClient, onEditCl
         {/* Expanded Filters Drawer */}
         {showFilters && (
           <div className="pt-4 border-t border-slate-700/80 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 text-xs animate-in slide-in-from-top-2 duration-200">
-            {/* Filter by Seller (Admin / Supervisor only) */}
-            {activeRole !== 'seller' && (
+            {/* Filter by Seller (Admin only) */}
+            {activeRole === 'admin' && (
               <div>
                 <label className="block text-slate-400 font-semibold mb-1">Vendedor</label>
                 <select
@@ -346,7 +342,6 @@ export const ClientList: React.FC<ClientListProps> = ({ onSelectClient, onEditCl
                   setFilters({
                     searchQuery: '',
                     sellerId: '',
-                    supervisorId: '',
                     sector: '',
                     startDate: '',
                     endDate: '',
