@@ -85,11 +85,26 @@ export const ClientList: React.FC<ClientListProps> = ({ onSelectClient, onEditCl
       // Text query
       if (filters.searchQuery) {
         const q = filters.searchQuery.toLowerCase();
+        const digitsQ = q.replace(/\D/g, '');
         const matchName = client.fullName.toLowerCase().includes(q);
-        const matchCedula = client.cedula.replace(/\D/g, '').includes(q.replace(/\D/g, ''));
-        const matchPhone = client.phone.replace(/\D/g, '').includes(q.replace(/\D/g, ''));
+        const matchBusiness = (client.businessName || '').toLowerCase().includes(q);
+        const matchCedula = digitsQ ? client.cedula.replace(/\D/g, '').includes(digitsQ) : false;
+        const matchPhone = digitsQ ? client.phone.replace(/\D/g, '').includes(digitsQ) : false;
+        const matchSecondaryPhone =
+          digitsQ && client.secondaryPhone
+            ? client.secondaryPhone.replace(/\D/g, '').includes(digitsQ)
+            : false;
         const matchSector = client.sector.toLowerCase().includes(q);
-        if (!matchName && !matchCedula && !matchPhone && !matchSector) return false;
+        if (
+          !matchName &&
+          !matchBusiness &&
+          !matchCedula &&
+          !matchPhone &&
+          !matchSecondaryPhone &&
+          !matchSector
+        ) {
+          return false;
+        }
       }
 
       // Seller filter
@@ -239,7 +254,7 @@ export const ClientList: React.FC<ClientListProps> = ({ onSelectClient, onEditCl
             type="text"
             value={filters.searchQuery}
             onChange={(e) => setFilters((prev) => ({ ...prev, searchQuery: e.target.value }))}
-            placeholder="Buscar por Nombre, Cédula dominicana, Teléfono o Sector..."
+            placeholder="Buscar por Nombre, Razón Social / Establecimiento, Cédula, Teléfono o Sector..."
             className="w-full pl-10 pr-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
           />
         </div>
@@ -447,6 +462,9 @@ export const ClientList: React.FC<ClientListProps> = ({ onSelectClient, onEditCl
 
                       <td className="p-3" onClick={() => onSelectClient(client)}>
                         <p className="font-bold text-white text-sm">{client.fullName}</p>
+                        {client.businessName && (
+                          <p className="text-[11px] font-semibold text-blue-300">{client.businessName}</p>
+                        )}
                         <p className="text-[11px] text-slate-400">{client.street}, No. {client.localNumber}</p>
                       </td>
 
@@ -455,7 +473,12 @@ export const ClientList: React.FC<ClientListProps> = ({ onSelectClient, onEditCl
                       </td>
 
                       <td className="p-3 font-mono text-slate-300" onClick={() => onSelectClient(client)}>
-                        {formatDominicanPhone(client.phone)}
+                        <p>{formatDominicanPhone(client.phone)}</p>
+                        {client.secondaryPhone && (
+                          <p className="text-[10px] text-slate-400">
+                            Sec: {formatDominicanPhone(client.secondaryPhone)}
+                          </p>
+                        )}
                       </td>
 
                       <td className="p-3 text-slate-300" onClick={() => onSelectClient(client)}>
@@ -543,7 +566,10 @@ export const ClientList: React.FC<ClientListProps> = ({ onSelectClient, onEditCl
                 <div className="flex items-start justify-between">
                   <div>
                     <h3 className="font-extrabold text-white text-base leading-snug">{client.fullName}</h3>
-                    <p className="text-xs font-mono text-blue-300 mt-0.5">Cédula: {client.cedula}</p>
+                    {client.businessName && (
+                      <p className="text-xs font-semibold text-blue-300 mt-0.5">{client.businessName}</p>
+                    )}
+                    <p className="text-xs font-mono text-slate-300 mt-0.5">Cédula: {client.cedula}</p>
                   </div>
                   {client.syncStatus === 'synced' ? (
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded-full">
@@ -557,9 +583,16 @@ export const ClientList: React.FC<ClientListProps> = ({ onSelectClient, onEditCl
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
-                  <div className="flex items-center gap-1.5">
-                    <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="font-mono">{formatDominicanPhone(client.phone)}</span>
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="font-mono">{formatDominicanPhone(client.phone)}</span>
+                    </div>
+                    {client.secondaryPhone && (
+                      <p className="text-[11px] text-slate-400 font-mono pl-5">
+                        {formatDominicanPhone(client.secondaryPhone)}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 truncate">
                     <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />

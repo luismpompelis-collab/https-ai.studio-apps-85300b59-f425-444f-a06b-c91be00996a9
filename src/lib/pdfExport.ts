@@ -56,6 +56,13 @@ export async function generateClientPDF(client: ClientData, companyName = 'CLIEN
   y += 7;
 
   doc.setFont('helvetica', 'bold');
+  doc.text('Razón Social / Local:', col1, y);
+  doc.setFont('helvetica', 'normal');
+  doc.text(client.businessName || 'No registrado', col1 + 35, y, { maxWidth: pageWidth - 60 });
+
+  y += 7;
+
+  doc.setFont('helvetica', 'bold');
   doc.text('Teléfono Principal:', col1, y);
   doc.setFont('helvetica', 'normal');
   doc.text(formatDominicanPhone(client.phone) || '-', col1 + 35, y);

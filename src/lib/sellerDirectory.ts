@@ -1,6 +1,8 @@
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getFirestore, doc, setDoc } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { db, stripUndefined } from './firebase';
 import { UserProfile } from '../types';
 
 export const SELLERS_DIRECTORY_KEY = 'clientes_pro_sellers_directory';
@@ -9,6 +11,8 @@ export const SELLERS_SYNC_CHANNEL = 'clientes_pro_sellers_sync';
 
 export interface LocalSellerRecord extends UserProfile {
   passwordHash?: string;
+  firebaseSynced?: boolean;
+  firebaseAuthCreated?: boolean;
 }
 
 function fallbackHash(input: string): string {
@@ -48,6 +52,10 @@ export function sanitizeRole(role: unknown): 'admin' | 'seller' {
   return role === 'admin' ? 'admin' : 'seller';
 }
 
+export function isLocalPlaceholderUid(uid: string): boolean {
+  return uid.startsWith('usr_') || uid === 'admin_luis_owner';
+}
+
 function broadcastDirectoryUpdate() {
   try {
     if (typeof BroadcastChannel !== 'undefined') {
@@ -68,7 +76,8 @@ export function getLocalDirectoryUsers(): LocalSellerRecord[] {
       if (Array.isArray(parsed)) {
         return parsed.map((u) => ({
           ...u,
-          role: sanitizeRole(u.role)
+          role: sanitizeRole(u.role),
+          active: u.active !== false
         }));
       }
     }
@@ -80,7 +89,8 @@ export function getLocalDirectoryUsers(): LocalSellerRecord[] {
       if (Array.isArray(legacy)) {
         const migrated = legacy.map((u) => ({
           ...u,
-          role: sanitizeRole(u.role)
+          role: sanitizeRole(u.role),
+          active: u.active !== false
         }));
         localStorage.setItem(SELLERS_DIRECTORY_KEY, JSON.stringify(migrated));
         return migrated;
@@ -96,7 +106,8 @@ export function saveLocalDirectoryUsers(users: LocalSellerRecord[]): void {
   try {
     const clean = users.map((u) => ({
       ...u,
-      role: sanitizeRole(u.role)
+      role: sanitizeRole(u.role),
+      active: u.active !== false
     }));
     localStorage.setItem(SELLERS_DIRECTORY_KEY, JSON.stringify(clean));
     broadcastDirectoryUpdate();
@@ -117,7 +128,11 @@ export function upsertLocalDirectoryUser(record: LocalSellerRecord): LocalSeller
     email: normalizedEmail,
     username: (record.username || normalizedEmail.split('@')[0]).trim().toLowerCase(),
     role: sanitizeRole(record.role),
-    passwordHash: record.passwordHash || (idx >= 0 ? existing[idx].passwordHash : undefined)
+    active: record.active !== false,
+    passwordHash: record.passwordHash || (idx >= 0 ? existing[idx].passwordHash : undefined),
+    firebaseSynced: record.firebaseSynced ?? (idx >= 0 ? existing[idx].firebaseSynced : false),
+    firebaseAuthCreated:
+      record.firebaseAuthCreated ?? (idx >= 0 ? existing[idx].firebaseAuthCreated : false)
   };
 
   let nextList: LocalSellerRecord[];
@@ -134,31 +149,63 @@ export function upsertLocalDirectoryUser(record: LocalSellerRecord): LocalSeller
 
 export function syncRemoteUsersToLocalDirectory(remoteUsers: UserProfile[]): LocalSellerRecord[] {
   const existing = getLocalDirectoryUsers();
-  const byUid = new Map<string, LocalSellerRecord>();
   const byEmail = new Map<string, LocalSellerRecord>();
 
   existing.forEach((u) => {
-    byUid.set(u.uid, u);
     byEmail.set(u.email.trim().toLowerCase(), u);
   });
 
   remoteUsers.forEach((remote) => {
     const emailKey = remote.email.trim().toLowerCase();
-    const prev = byUid.get(remote.uid) || byEmail.get(emailKey);
+    const prev = byEmail.get(emailKey);
+    // Prefer real Firebase Auth UID over local placeholder usr_* UID
+    const preferRemoteUid =
+      !prev ||
+      !isLocalPlaceholderUid(remote.uid) ||
+      isLocalPlaceholderUid(prev.uid);
+
     const merged: LocalSellerRecord = {
       ...prev,
       ...remote,
+      uid: preferRemoteUid ? remote.uid : prev.uid,
       email: emailKey,
       role: sanitizeRole(remote.role),
-      passwordHash: prev?.passwordHash
+      active: remote.active !== false,
+      passwordHash: prev?.passwordHash,
+      firebaseSynced: true,
+      firebaseAuthCreated:
+        prev?.firebaseAuthCreated || !isLocalPlaceholderUid(remote.uid)
     };
-    byUid.set(merged.uid, merged);
     byEmail.set(emailKey, merged);
   });
 
-  const mergedList = Array.from(byUid.values());
+  const mergedList = Array.from(byEmail.values());
   saveLocalDirectoryUsers(mergedList);
   return mergedList;
+}
+
+export function deduplicateUsersByEmail(users: UserProfile[]): UserProfile[] {
+  const byEmail = new Map<string, UserProfile>();
+  users.forEach((u) => {
+    const key = u.email.trim().toLowerCase();
+    const prev = byEmail.get(key);
+    if (!prev) {
+      byEmail.set(key, u);
+      return;
+    }
+    const prevIsLocal = isLocalPlaceholderUid(prev.uid);
+    const currIsLocal = isLocalPlaceholderUid(u.uid);
+    if (prevIsLocal && !currIsLocal) {
+      byEmail.set(key, u);
+    } else if (prevIsLocal === currIsLocal) {
+      const prevTime = new Date(prev.updatedAt || prev.createdAt || 0).getTime();
+      const currTime = new Date(u.updatedAt || u.createdAt || 0).getTime();
+      if (currTime >= prevTime) {
+        byEmail.set(key, u);
+      }
+    }
+  });
+  return Array.from(byEmail.values());
 }
 
 export function findLocalDirectoryUserByIdentifier(identifier: string): LocalSellerRecord | null {
@@ -180,10 +227,16 @@ export function findLocalDirectoryUserByIdentifier(identifier: string): LocalSel
 }
 
 export function stripPasswordHash(record: LocalSellerRecord): UserProfile {
-  const { passwordHash: _ignored, ...profile } = record;
+  const {
+    passwordHash: _ignoredHash,
+    firebaseSynced: _ignoredSync,
+    firebaseAuthCreated: _ignoredAuth,
+    ...profile
+  } = record;
   return {
     ...profile,
-    role: sanitizeRole(profile.role)
+    role: sanitizeRole(profile.role),
+    active: profile.active !== false
   };
 }
 
@@ -206,7 +259,7 @@ export async function authenticateLocalUser(
     return { error: 'Contraseña incorrecta.' };
   }
 
-  if (!match.active) {
+  if (match.active === false) {
     return { error: 'Tu cuenta ha sido suspendida por el Administrador.' };
   }
 
@@ -214,27 +267,65 @@ export async function authenticateLocalUser(
 }
 
 /**
- * Attempts to create a real Firebase Auth Email/Password user using a secondary
- * Firebase App instance so the currently signed-in Administrator stays logged in.
- * Falls back gracefully if Email/Password Auth is not enabled in Firebase Console.
+ * Creates a real Firebase Auth Email/Password user using a secondary Firebase App
+ * instance (keeping the Administrator logged in on the primary app) and writes
+ * the new seller's profile directly into Firestore `/users/{uid}` using the new
+ * seller's authenticated session.
  */
 export async function tryCreateFirebaseAuthSeller(
   email: string,
-  password: string
-): Promise<{ uid: string | null; authCreated: boolean; errorCode?: string }> {
+  password: string,
+  profileTemplate?: {
+    fullName: string;
+    username: string;
+    adminId: string;
+    adminName: string;
+    createdAt: string;
+  }
+): Promise<{
+  uid: string | null;
+  authCreated: boolean;
+  firestoreWritten: boolean;
+  errorCode?: string;
+}> {
   const secondaryAppName = `seller_creator_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   let secondaryApp;
   try {
     secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
     const secondaryAuth = getAuth(secondaryApp);
-    const cred = await createUserWithEmailAndPassword(secondaryAuth, email.trim().toLowerCase(), password);
+    const cleanEmail = email.trim().toLowerCase();
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password);
     const createdUid = cred.user.uid;
+    let firestoreWritten = false;
+
+    if (profileTemplate) {
+      try {
+        const secondaryDb = getFirestore(secondaryApp, firebaseConfig.firestoreDatabaseId);
+        const sellerDoc: UserProfile = stripUndefined({
+          uid: createdUid,
+          fullName: profileTemplate.fullName,
+          username: profileTemplate.username,
+          email: cleanEmail,
+          role: 'seller',
+          adminId: profileTemplate.adminId,
+          adminName: profileTemplate.adminName,
+          active: true,
+          createdAt: profileTemplate.createdAt
+        });
+        await setDoc(doc(secondaryDb, 'users', createdUid), sellerDoc);
+        firestoreWritten = true;
+      } catch (fsErr) {
+        console.warn('No se pudo escribir perfil inicial en Firestore desde sesión secundaria:', fsErr);
+      }
+    }
+
     await signOut(secondaryAuth).catch(() => {});
-    return { uid: createdUid, authCreated: true };
+    return { uid: createdUid, authCreated: true, firestoreWritten };
   } catch (err: any) {
     return {
       uid: null,
       authCreated: false,
+      firestoreWritten: false,
       errorCode: err?.code || 'unknown'
     };
   } finally {
@@ -242,4 +333,53 @@ export async function tryCreateFirebaseAuthSeller(
       await deleteApp(secondaryApp).catch(() => {});
     }
   }
+}
+
+/**
+ * Pushes any locally created sellers that are not yet synced to Firestore
+ * once the Administrator is signed in with Firebase Auth.
+ */
+export async function syncLocalSellersToFirestore(
+  adminUid: string,
+  adminName: string
+): Promise<number> {
+  const localUsers = getLocalDirectoryUsers();
+  let syncedCount = 0;
+
+  for (const record of localUsers) {
+    if (record.firebaseSynced) continue;
+
+    const cleanProfile: UserProfile = stripUndefined({
+      ...stripPasswordHash(record),
+      adminId: record.role === 'admin' ? null : record.adminId || adminUid,
+      adminName: record.role === 'admin' ? null : record.adminName || adminName
+    });
+
+    try {
+      await setDoc(doc(db, 'users', cleanProfile.uid), cleanProfile, { merge: true });
+      if (cleanProfile.role === 'seller') {
+        await setDoc(
+          doc(db, 'seller_invites', emailToInviteId(cleanProfile.email)),
+          stripUndefined({
+            fullName: cleanProfile.fullName,
+            username: cleanProfile.username,
+            email: cleanProfile.email.toLowerCase(),
+            role: 'seller',
+            adminId: cleanProfile.adminId || adminUid,
+            adminName: cleanProfile.adminName || adminName,
+            active: cleanProfile.active,
+            createdAt: cleanProfile.createdAt,
+            updatedAt: new Date().toISOString()
+          }),
+          { merge: true }
+        );
+      }
+      upsertLocalDirectoryUser({ ...record, ...cleanProfile, firebaseSynced: true });
+      syncedCount++;
+    } catch (err) {
+      console.warn(`No se pudo sincronizar vendedor ${cleanProfile.email} a Firestore:`, err);
+    }
+  }
+
+  return syncedCount;
 }

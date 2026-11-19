@@ -1,7 +1,7 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default Deny
+    // Global Default Deny
     match /{document=**} {
       allow read, write: if false;
     }
@@ -39,6 +39,86 @@ service cloud.firestore {
         getUserDoc().active == true;
     }
 
+    function isValidUser(data, userId) {
+      return data.keys().hasAll(['uid', 'fullName', 'email', 'role', 'active']) &&
+        data.keys().hasOnly([
+          'uid', 'fullName', 'username', 'email', 'role',
+          'adminId', 'adminName', 'active', 'phone', 'createdAt', 'updatedAt'
+        ]) &&
+        data.uid is string && data.uid == userId && data.uid.size() <= 128 &&
+        data.fullName is string && data.fullName.size() > 0 && data.fullName.size() <= 150 &&
+        data.email is string && data.email.size() > 0 && data.email.size() <= 120 &&
+        data.role in ['admin', 'seller'] &&
+        data.active is bool &&
+        (!('username' in data) || data.username == null || (data.username is string && data.username.size() <= 60)) &&
+        (!('adminId' in data) || data.adminId == null || (data.adminId is string && data.adminId.size() <= 128)) &&
+        (!('adminName' in data) || data.adminName == null || (data.adminName is string && data.adminName.size() <= 150)) &&
+        (!('phone' in data) || data.phone == null || (data.phone is string && data.phone.size() <= 30)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 50)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 50));
+    }
+
+    function isValidInvite(data) {
+      return data.keys().hasAll(['fullName', 'email', 'role', 'adminId', 'active']) &&
+        data.keys().hasOnly([
+          'fullName', 'username', 'email', 'role',
+          'adminId', 'adminName', 'active', 'createdAt', 'updatedAt'
+        ]) &&
+        data.fullName is string && data.fullName.size() > 0 && data.fullName.size() <= 150 &&
+        data.email is string && data.email.size() > 0 && data.email.size() <= 120 &&
+        data.role == 'seller' &&
+        data.active is bool &&
+        data.adminId is string && data.adminId.size() > 0 && data.adminId.size() <= 128 &&
+        (!('username' in data) || data.username == null || (data.username is string && data.username.size() <= 60)) &&
+        (!('adminName' in data) || data.adminName == null || (data.adminName is string && data.adminName.size() <= 150)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 50)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 50));
+    }
+
+    function isValidClient(data, clientId) {
+      return data.keys().hasAll([
+          'clientId', 'fullName', 'cedula', 'phone',
+          'sector', 'street', 'localNumber', 'sellerId', 'sellerName'
+        ]) &&
+        data.keys().hasOnly([
+          'clientId', 'fullName', 'businessName', 'cedula',
+          'cedulaFront', 'cedulaBack', 'signature', 'stage', 'notes',
+          'phone', 'secondaryPhone', 'sector', 'street', 'localNumber',
+          'additionalAddress', 'latitude', 'longitude', 'accuracy', 'capturedAt',
+          'sellerId', 'sellerName', 'adminId', 'createdAt', 'updatedAt',
+          'syncStatus', 'syncError', 'deletedAt', 'deletedBy'
+        ]) &&
+        data.clientId is string && data.clientId == clientId && data.clientId.size() <= 128 &&
+        data.fullName is string && data.fullName.size() > 0 && data.fullName.size() <= 150 &&
+        (!('businessName' in data) || data.businessName == null || (data.businessName is string && data.businessName.size() <= 150)) &&
+        data.cedula is string && data.cedula.size() > 0 && data.cedula.size() <= 20 &&
+        data.phone is string && data.phone.size() > 0 && data.phone.size() <= 30 &&
+        (!('secondaryPhone' in data) || data.secondaryPhone == null || (data.secondaryPhone is string && data.secondaryPhone.size() <= 30)) &&
+        data.sector is string && data.sector.size() > 0 && data.sector.size() <= 100 &&
+        data.street is string && data.street.size() > 0 && data.street.size() <= 150 &&
+        data.localNumber is string && data.localNumber.size() > 0 && data.localNumber.size() <= 50 &&
+        (!('additionalAddress' in data) || data.additionalAddress == null || (data.additionalAddress is string && data.additionalAddress.size() <= 250)) &&
+        data.sellerId is string && data.sellerId.size() > 0 && data.sellerId.size() <= 128 &&
+        data.sellerName is string && data.sellerName.size() > 0 && data.sellerName.size() <= 150 &&
+        (!('adminId' in data) || data.adminId == null || (data.adminId is string && data.adminId.size() <= 128)) &&
+        (!('notes' in data) || (data.notes is list && data.notes.size() <= 100)) &&
+        (!('syncStatus' in data) || data.syncStatus in ['synced', 'pending', 'syncing', 'failed']);
+    }
+
+    function isValidAuditLog(data, logId) {
+      return data.keys().hasAll(['logId', 'userId', 'action', 'timestamp']) &&
+        data.keys().hasOnly([
+          'logId', 'userId', 'userName', 'userEmail', 'userRole',
+          'clientId', 'clientName', 'action', 'changes', 'timestamp', 'device'
+        ]) &&
+        data.logId is string && data.logId == logId && data.logId.size() <= 128 &&
+        data.userId is string && data.userId == request.auth.uid && data.userId.size() <= 128 &&
+        data.action is string && data.action.size() > 0 && data.action.size() <= 50 &&
+        data.timestamp is string && data.timestamp.size() <= 50 &&
+        (!('changes' in data) || (data.changes is string && data.changes.size() <= 1000)) &&
+        (!('device' in data) || (data.device is string && data.device.size() <= 150));
+    }
+
     function isValidPresence(data, userId) {
       return data.keys().hasAll(['uid', 'fullName', 'role', 'isOnline', 'lastSeenAt']) &&
         data.keys().hasOnly(['uid', 'fullName', 'role', 'isOnline', 'lastSeenAt']) &&
@@ -59,14 +139,14 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && (isAdmin() || request.auth.uid == userId);
       allow list: if isAdmin();
-      allow create: if isSignedIn() && isValidId(userId) && (
+      allow create: if isSignedIn() && isValidId(userId) && isValidUser(request.resource.data, userId) && (
         isAdmin() ||
         (request.auth.uid == userId &&
          request.resource.data.uid == userId &&
          request.resource.data.role == 'seller' &&
          request.resource.data.active == true)
       );
-      allow update: if isSignedIn() && isValidId(userId) && (
+      allow update: if isSignedIn() && isValidId(userId) && isValidUser(request.resource.data, userId) && (
         isAdmin() ||
         (request.auth.uid == userId &&
          request.resource.data.uid == resource.data.uid &&
@@ -76,45 +156,52 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(userId);
     }
 
-    // Seller Invites Collection (Admin creates, Seller claims matching email on Google Sign-In)
+    // Seller Invites Collection (Admin creates, Seller claims matching verified email on Google Sign-In)
     match /seller_invites/{inviteId} {
       allow get: if isSignedIn() && isValidId(inviteId) && (
         isAdmin() ||
         (request.auth.token.email != null &&
-         resource.data.email == request.auth.token.email.lower())
+         request.auth.token.email_verified == true && (
+           (resource != null && resource.data.email == request.auth.token.email.lower()) ||
+           (resource == null && inviteId == ('inv_' + request.auth.token.email.lower().replace('[^a-z0-9]', '_')))
+         ))
       );
       allow list: if isAdmin();
-      allow create, update: if isAdmin() && isValidId(inviteId) &&
-        request.resource.data.email is string &&
-        request.resource.data.fullName is string &&
-        request.resource.data.role == 'seller' &&
-        request.resource.data.active is bool;
+      allow create, update: if isAdmin() && isValidId(inviteId) && isValidInvite(request.resource.data);
       allow delete: if isAdmin() && isValidId(inviteId);
     }
 
     // Clients Collection (Direct Admin <-> Seller ownership)
     match /clients/{clientId} {
-      allow read: if isSignedIn() && (
+      allow get: if isSignedIn() && isValidId(clientId) && (
+        isAdmin() ||
+        (resource != null && resource.data.sellerId == request.auth.uid) ||
+        resource == null
+      );
+      allow list: if isSignedIn() && (
         isAdmin() ||
         resource.data.sellerId == request.auth.uid
       );
-      allow create: if isSignedIn() && (
+      allow create: if isSignedIn() && isValidId(clientId) && isValidClient(request.resource.data, clientId) && (
         isAdmin() ||
         (isActiveSeller() && request.resource.data.sellerId == request.auth.uid)
       );
-      allow update: if isSignedIn() && (
+      allow update: if isSignedIn() && isValidId(clientId) && isValidClient(request.resource.data, clientId) && (
         isAdmin() ||
         (isActiveSeller() &&
          resource.data.sellerId == request.auth.uid &&
          request.resource.data.sellerId == resource.data.sellerId)
       );
-      allow delete: if isAdmin() || (isActiveSeller() && resource.data.sellerId == request.auth.uid);
+      allow delete: if isValidId(clientId) && (
+        isAdmin() ||
+        (isActiveSeller() && resource.data.sellerId == request.auth.uid)
+      );
     }
 
     // Audit Logs Collection (Append-only)
     match /audit_logs/{logId} {
       allow read: if isAdmin();
-      allow create: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(logId) && isValidAuditLog(request.resource.data, logId);
       allow update, delete: if false;
     }
 
@@ -123,7 +210,7 @@ service cloud.firestore {
       allow get: if isSignedIn() && isValidId(userId) && (
         request.auth.uid == userId ||
         isAdmin() ||
-        resource.data.role == 'admin'
+        (resource != null && resource.data.role == 'admin')
       );
       allow list: if isSignedIn() && (
         isAdmin() ||

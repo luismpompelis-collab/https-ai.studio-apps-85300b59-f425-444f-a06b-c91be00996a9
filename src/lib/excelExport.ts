@@ -9,6 +9,7 @@ export function exportClientsToExcel(clients: ClientData[], filenamePrefix = 'Re
       'ID Sistema': c.clientId,
       'Cédula': c.cedula,
       'Nombre Completo': c.fullName,
+      'Razón Social / Establecimiento': c.businessName || '',
       'Teléfono Principal': formatDominicanPhone(c.phone),
       'Teléfono Secundario': c.secondaryPhone ? formatDominicanPhone(c.secondaryPhone) : '',
       'Sector / Zona': c.sector,
@@ -42,6 +43,7 @@ export function exportClientsToExcel(clients: ClientData[], filenamePrefix = 'Re
     { wch: 22 }, // ID Sistema
     { wch: 16 }, // Cédula
     { wch: 30 }, // Nombre Completo
+    { wch: 30 }, // Razón Social / Establecimiento
     { wch: 18 }, // Teléfono Principal
     { wch: 18 }, // Teléfono Secundario
     { wch: 25 }, // Sector

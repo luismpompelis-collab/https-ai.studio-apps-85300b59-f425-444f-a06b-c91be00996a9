@@ -121,13 +121,14 @@ export const ClientDossierModal: React.FC<ClientDossierModalProps> = ({
 EXPEDIENTE DE CLIENTE - CLIENTES PRO
 ==============================
 1. Nombre Completo: ${client.fullName}
-2. Cédula: ${client.cedula}
-3. Teléfono Principal: ${formatDominicanPhone(client.phone)}
-4. Teléfono Secundario: ${client.secondaryPhone ? formatDominicanPhone(client.secondaryPhone) : 'N/A'}
-5. Sector: ${client.sector}
-6. Calle: ${client.street}
-7. No. Local / Casa: ${client.localNumber}
-8. Dirección Adicional: ${client.additionalAddress || 'Sin referencia'}
+2. Razón Social / Establecimiento: ${client.businessName || 'N/A'}
+3. Cédula: ${client.cedula}
+4. Teléfono Principal: ${formatDominicanPhone(client.phone)}
+5. Número de Teléfono Secundario: ${client.secondaryPhone ? formatDominicanPhone(client.secondaryPhone) : 'N/A'}
+6. Sector: ${client.sector}
+7. Calle: ${client.street}
+8. No. Local / Casa: ${client.localNumber}
+9. Dirección Adicional: ${client.additionalAddress || 'Sin referencia'}
 ------------------------------
 ${gpsText}
 ------------------------------
@@ -299,6 +300,13 @@ Estado de Sincronización: ${client.syncStatus.toUpperCase()}
               </div>
 
               <div>
+                <p className="text-xs text-slate-400 uppercase font-semibold">Razón Social / Establecimiento</p>
+                <p className="text-base font-bold text-blue-300 mt-0.5">
+                  {client.businessName || 'No registrado'}
+                </p>
+              </div>
+
+              <div>
                 <p className="text-xs text-slate-400 uppercase font-semibold">4. Número de Cédula</p>
                 <p className="text-base font-mono font-bold text-blue-300 mt-0.5">{client.cedula}</p>
               </div>
@@ -354,10 +362,23 @@ Estado de Sincronización: ${client.syncStatus.toUpperCase()}
               </div>
 
               <div>
-                <p className="text-xs text-slate-400 uppercase font-semibold">6. Teléfono Secundario</p>
-                <p className="text-sm text-slate-300 font-mono mt-0.5">
-                  {client.secondaryPhone ? formatDominicanPhone(client.secondaryPhone) : 'No registrado'}
-                </p>
+                <p className="text-xs text-slate-400 uppercase font-semibold">6. Número de Teléfono Secundario</p>
+                {client.secondaryPhone ? (
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-sm font-bold text-slate-200 font-mono">
+                      {formatDominicanPhone(client.secondaryPhone)}
+                    </span>
+                    <a
+                      href={`tel:${client.secondaryPhone.replace(/\D/g, '')}`}
+                      className="p-1 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white transition"
+                      title="Llamar al teléfono secundario"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-400 font-mono mt-0.5">No registrado</p>
+                )}
               </div>
 
               <div>

@@ -48,7 +48,8 @@ function getInitialSampleClients(): ClientData[] {
   return [
     {
       clientId: 'CLI_DO_001',
-      fullName: 'Rafael Antonio De La Cruz (Colmado San Rafael)',
+      fullName: 'Rafael Antonio De La Cruz',
+      businessName: 'Colmado San Rafael',
       cedula: '001-0872635-7',
       phone: '8095412234',
       secondaryPhone: '8296541122',
@@ -69,7 +70,8 @@ function getInitialSampleClients(): ClientData[] {
     },
     {
       clientId: 'CLI_DO_002',
-      fullName: 'Ana María Rodríguez Peña (Distribuidora Los Prados)',
+      fullName: 'Ana María Rodríguez Peña',
+      businessName: 'Distribuidora Los Prados',
       cedula: '001-1678942-1',
       phone: '8296338891',
       sector: 'Los Prados (Distrito Nacional)',
@@ -89,7 +91,8 @@ function getInitialSampleClients(): ClientData[] {
     },
     {
       clientId: 'CLI_DO_003',
-      fullName: 'Juan Carlos Morales Jiménez (Farmacia Gurabo)',
+      fullName: 'Juan Carlos Morales Jiménez',
+      businessName: 'Farmacia Gurabo',
       cedula: '031-0456123-2',
       phone: '8095827712',
       sector: 'Santiago - Gurabo',

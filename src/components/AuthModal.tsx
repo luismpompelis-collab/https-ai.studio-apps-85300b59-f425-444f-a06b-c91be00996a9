@@ -271,7 +271,7 @@ export const AuthModal: React.FC = () => {
 
           {tab === 'register' && (
             <p className="text-[11px] text-slate-400 bg-slate-800/60 border border-slate-700/70 rounded-xl p-2.5">
-              Tu cuenta se creará como <strong className="text-blue-300">Vendedor Comercial</strong> y quedará conectada automáticamente con el Administrador.
+              Tu cuenta se creará como <strong className="text-blue-300">Vendedor Comercial</strong> y quedará conectada directamente con la base de datos de Firebase y con el Administrador.
             </p>
           )}
 

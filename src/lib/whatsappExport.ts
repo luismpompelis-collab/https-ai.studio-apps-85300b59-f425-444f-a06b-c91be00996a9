@@ -17,7 +17,7 @@ export function formatWhatsAppPlanilla(client: ClientData): string {
   return `📋 *PLANILLA OFICIAL DE REGISTRO - CLIENTES PRO*
 ━━━━━━━━━━━━━━━━━━━━
 👤 *CLIENTE:* ${client.fullName}
-🆔 *CÉDULA:* ${client.cedula}
+${client.businessName ? `🏪 *RAZÓN SOCIAL / ESTABLECIMIENTO:* ${client.businessName}\n` : ''}🆔 *CÉDULA:* ${client.cedula}
 📞 *TELÉFONO PRINCIPAL:* ${formatDominicanPhone(client.phone)}
 ${client.secondaryPhone ? `📱 *TELÉFONO SECUNDARIO:* ${formatDominicanPhone(client.secondaryPhone)}\n` : ''}📍 *SECTOR / ZONA:* ${client.sector}
 🏢 *DIRECCIÓN:* ${client.street}, No. ${client.localNumber}

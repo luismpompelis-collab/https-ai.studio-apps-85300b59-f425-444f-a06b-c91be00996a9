@@ -166,9 +166,10 @@ export const ClientMapView: React.FC<ClientMapViewProps> = ({ onSelectClient }) 
       if (search) {
         const q = search.toLowerCase();
         const matchName = c.fullName.toLowerCase().includes(q);
+        const matchBusiness = (c.businessName || '').toLowerCase().includes(q);
         const matchSector = c.sector.toLowerCase().includes(q);
         const matchCedula = c.cedula.includes(q);
-        if (!matchName && !matchSector && !matchCedula) return false;
+        if (!matchName && !matchBusiness && !matchSector && !matchCedula) return false;
       }
 
       return true;
@@ -380,9 +381,16 @@ export const ClientMapView: React.FC<ClientMapViewProps> = ({ onSelectClient }) 
               >
                 <div className="p-1 text-slate-900 min-w-[220px] font-sans">
                   <div className="flex items-start justify-between gap-2 mb-1">
-                    <h4 className="text-sm font-extrabold text-slate-900 leading-tight">
-                      {selectedClient.fullName}
-                    </h4>
+                    <div>
+                      <h4 className="text-sm font-extrabold text-slate-900 leading-tight">
+                        {selectedClient.fullName}
+                      </h4>
+                      {selectedClient.businessName && (
+                        <p className="text-[11px] font-bold text-blue-700 mt-0.5">
+                          {selectedClient.businessName}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <p className="text-[11px] text-slate-500 font-mono mb-2">
                     Cédula: {selectedClient.cedula}

@@ -42,6 +42,7 @@
       "properties": {
         "clientId": { "type": "string", "maxLength": 128 },
         "fullName": { "type": "string", "maxLength": 150 },
+        "businessName": { "type": "string", "maxLength": 150 },
         "cedula": { "type": "string", "maxLength": 20 },
         "cedulaFront": { "type": "string", "maxLength": 2000000 },
         "cedulaBack": { "type": "string", "maxLength": 2000000 },

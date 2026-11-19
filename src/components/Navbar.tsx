@@ -16,7 +16,8 @@ import {
   Compass,
   Download,
   Radio,
-  Link2
+  Link2,
+  Cloud
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -26,7 +27,7 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onOpenSyncModal }) => {
-  const { userProfile, logout, activeRole } = useAuth();
+  const { userProfile, logout, activeRole, isFirebaseConnected, loginWithGoogle } = useAuth();
   const { isOnline, pendingCount, isSyncing } = useSync();
   const { totalConnectedSellers, isAdminOnline, connectedAdmins } = usePresence();
 
@@ -176,6 +177,29 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onOpenS
                     {isAdminOnline ? 'Admin En Línea' : 'Conectado con Admin'}
                   </span>
                 </div>
+              )}
+
+              {/* Firebase Database Connection Indicator / Connect Action */}
+              {isFirebaseConnected ? (
+                <div
+                  className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-sky-950/50 border border-sky-800/70 text-sky-300"
+                  title="Sesión conectada en tiempo real a la base de datos de Firebase Firestore"
+                >
+                  <Cloud className="w-3.5 h-3.5 text-sky-400" />
+                  <span className="text-[11px]">Firebase</span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    loginWithGoogle().catch(() => {});
+                  }}
+                  className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-950/50 hover:bg-amber-900/60 border border-amber-700/70 text-amber-200 transition-colors"
+                  title="Conecta tu cuenta con Google para sincronizar usuarios y clientes con la base de datos de Firebase"
+                >
+                  <Cloud className="w-3.5 h-3.5 text-amber-300" />
+                  <span className="text-[11px]">Conectar Firebase</span>
+                </button>
               )}
 
               {/* Online / Offline status badge */}

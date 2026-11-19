@@ -45,6 +45,7 @@ export interface ClientNote {
 export interface ClientData {
   clientId: string;
   fullName: string;
+  businessName?: string;
   cedula: string;
   cedulaFront?: string | null; // URL or Base64
   cedulaBack?: string | null; // URL or Base64

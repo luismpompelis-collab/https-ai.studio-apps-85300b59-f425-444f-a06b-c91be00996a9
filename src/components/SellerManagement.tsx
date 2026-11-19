@@ -4,18 +4,21 @@ import { useSync } from '../context/SyncContext';
 import { usePresence } from '../context/PresenceContext';
 import { isPresenceActive } from '../lib/presence';
 import { UserProfile, UserRole } from '../types';
-import { collection, doc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { db, stripUndefined } from '../lib/firebase';
 import { recordAuditLog } from '../lib/audit';
 import {
   SELLERS_DIRECTORY_KEY,
   SELLERS_SYNC_CHANNEL,
+  deduplicateUsersByEmail,
   emailToInviteId,
   findLocalDirectoryUserByIdentifier,
   getLocalDirectoryUsers,
   hashPassword,
+  isLocalPlaceholderUid,
   sanitizeRole,
   stripPasswordHash,
+  syncLocalSellersToFirestore,
   syncRemoteUsersToLocalDirectory,
   tryCreateFirebaseAuthSeller,
   upsertLocalDirectoryUser
@@ -33,12 +36,14 @@ import {
   Link2,
   Copy,
   Check,
-  KeyRound
+  KeyRound,
+  Cloud,
+  CloudOff
 } from 'lucide-react';
 import { formatDominicanDateTime } from '../lib/dominicanValidation';
 
 export const SellerManagement: React.FC = () => {
-  const { currentUser, userProfile } = useAuth();
+  const { currentUser, userProfile, isFirebaseConnected, loginWithGoogle } = useAuth();
   const { allClients } = useSync();
   const {
     connectedSellers,
@@ -69,21 +74,19 @@ export const SellerManagement: React.FC = () => {
   const [copiedCreds, setCopiedCreds] = useState(false);
   const [confirmToggleUid, setConfirmToggleUid] = useState<string | null>(null);
 
+  const [connectingFirebase, setConnectingFirebase] = useState(false);
+
   const adminUid = currentUser?.uid || userProfile?.uid || 'admin_luis_owner';
   const adminName = userProfile?.fullName || 'Luis M. Pompelis';
 
   const loadLocalView = useCallback((): UserProfile[] => {
     const dir = getLocalDirectoryUsers().map(stripPasswordHash);
-    const merged = new Map<string, UserProfile>();
+    const list: UserProfile[] = [];
     if (userProfile) {
-      merged.set(userProfile.uid, { ...userProfile, role: sanitizeRole(userProfile.role) });
+      list.push({ ...userProfile, role: sanitizeRole(userProfile.role) });
     }
-    dir.forEach((u) => {
-      if (!merged.has(u.uid)) {
-        merged.set(u.uid, u);
-      }
-    });
-    return Array.from(merged.values()).sort(
+    list.push(...dir);
+    return deduplicateUsersByEmail(list).sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   }, [userProfile]);
@@ -107,11 +110,13 @@ export const SellerManagement: React.FC = () => {
       });
 
       const merged = syncRemoteUsersToLocalDirectory(remoteList).map(stripPasswordHash);
-      if (userProfile && !merged.some((u) => u.uid === userProfile.uid)) {
+      if (userProfile) {
         merged.unshift(userProfile);
       }
-      merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setUsersList(merged);
+      const unique = deduplicateUsersByEmail(merged).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      setUsersList(unique);
     } catch (err) {
       console.warn('Error fetching users, using local directory:', err);
       setUsersList(loadLocalView());
@@ -123,6 +128,57 @@ export const SellerManagement: React.FC = () => {
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
+
+  // Real-time Firestore listener so newly connected sellers appear immediately
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const unsubscribe = onSnapshot(
+      collection(db, 'users'),
+      (snap) => {
+        const remoteList: UserProfile[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as UserProfile;
+          remoteList.push({
+            ...data,
+            role: sanitizeRole(data.role)
+          });
+        });
+        const merged = syncRemoteUsersToLocalDirectory(remoteList).map(stripPasswordHash);
+        if (userProfile) {
+          merged.unshift(userProfile);
+        }
+        const unique = deduplicateUsersByEmail(merged).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        setUsersList(unique);
+        setLoading(false);
+      },
+      (err) => {
+        console.warn('Error en escucha en vivo de usuarios Firestore:', err);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser, userProfile]);
+
+  const handleConnectAdminFirebase = async () => {
+    setConnectingFirebase(true);
+    try {
+      await loginWithGoogle();
+      setActionFeedback({
+        type: 'success',
+        text: 'Administrador conectado a Firebase. Los vendedores y expedientes ahora se sincronizan en tiempo real con Firestore.'
+      });
+    } catch (err: any) {
+      setActionFeedback({
+        type: 'error',
+        text: err?.message || 'No se pudo conectar con Firebase.'
+      });
+    } finally {
+      setConnectingFirebase(false);
+    }
+  };
 
   // Listen for seller updates across tabs
   useEffect(() => {
@@ -263,13 +319,18 @@ export const SellerManagement: React.FC = () => {
         const now = new Date().toISOString();
         const passwordHash = await hashPassword(password);
 
-        // Try creating a real Firebase Auth account using secondary app without logging out Admin
+        // Always attempt creating a real Firebase Auth + Firestore user using a secondary app
+        // so the new seller connects directly to Firebase upon login without logging out Admin
         let createdUid = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        if (currentUser) {
-          const authRes = await tryCreateFirebaseAuthSeller(cleanEmail, password);
-          if (authRes.uid) {
-            createdUid = authRes.uid;
-          }
+        const authRes = await tryCreateFirebaseAuthSeller(cleanEmail, password, {
+          fullName: cleanFullName,
+          username: derivedUsername,
+          adminId: adminUid,
+          adminName: adminName,
+          createdAt: now
+        });
+        if (authRes.uid) {
+          createdUid = authRes.uid;
         }
 
         const newProfile: UserProfile = stripUndefined({
@@ -284,36 +345,47 @@ export const SellerManagement: React.FC = () => {
           createdAt: now
         });
 
-        // Persist in shared directory with password hash so seller can log in immediately
-        upsertLocalDirectoryUser({
-          ...newProfile,
-          passwordHash
-        });
+        let firestoreSynced = authRes.firestoreWritten;
 
         // Also persist profile & Google-claim invite to Firestore when Admin is signed in
         if (currentUser) {
-          await setDoc(doc(db, 'users', createdUid), newProfile).catch((err) => {
+          try {
+            await setDoc(doc(db, 'users', createdUid), newProfile, { merge: true });
+            firestoreSynced = true;
+          } catch (err) {
             console.warn('No se pudo guardar perfil en Firestore:', err);
-          });
+          }
 
           if (role === 'seller') {
-            await setDoc(
-              doc(db, 'seller_invites', emailToInviteId(cleanEmail)),
-              stripUndefined({
-                fullName: cleanFullName,
-                username: derivedUsername,
-                email: cleanEmail,
-                role: 'seller',
-                adminId: adminUid,
-                adminName: adminName,
-                active: true,
-                createdAt: now
-              })
-            ).catch((err) => {
+            try {
+              await setDoc(
+                doc(db, 'seller_invites', emailToInviteId(cleanEmail)),
+                stripUndefined({
+                  fullName: cleanFullName,
+                  username: derivedUsername,
+                  email: cleanEmail,
+                  role: 'seller',
+                  adminId: adminUid,
+                  adminName: adminName,
+                  active: true,
+                  createdAt: now
+                }),
+                { merge: true }
+              );
+              firestoreSynced = true;
+            } catch (err) {
               console.warn('No se pudo guardar invitación de vendedor en Firestore:', err);
-            });
+            }
           }
         }
+
+        // Persist in shared directory with password hash & Firebase sync status
+        upsertLocalDirectoryUser({
+          ...newProfile,
+          passwordHash,
+          firebaseSynced: firestoreSynced,
+          firebaseAuthCreated: authRes.authCreated
+        });
 
         if (userProfile) {
           recordAuditLog(userProfile, 'USUARIO_CREADO', {
@@ -321,9 +393,15 @@ export const SellerManagement: React.FC = () => {
           });
         }
 
+        const feedbackMessage = authRes.authCreated
+          ? `¡Cuenta de ${cleanFullName} creada y conectada en vivo con Firebase Auth y Firestore! Al iniciar sesión desde cualquier dispositivo se conectará directo a la base de datos.`
+          : firestoreSynced
+          ? `¡Cuenta de ${cleanFullName} guardada en Firebase Firestore! Al entrar con Google usando ${cleanEmail} quedará conectada directo a la base de datos (y en este equipo también puede entrar con usuario/contraseña).`
+          : `¡Cuenta de ${cleanFullName} creada! Para sincronizarla con la base de datos de Firebase en otros dispositivos, pulsa "Conectar con Firebase (Google)" arriba.`;
+
         setActionFeedback({
           type: 'success',
-          text: `¡Cuenta de ${cleanFullName} creada y conectada con el Administrador! Ya puede iniciar sesión inmediatamente.`,
+          text: feedbackMessage,
           credentials: {
             fullName: cleanFullName,
             username: derivedUsername,
@@ -451,22 +529,56 @@ export const SellerManagement: React.FC = () => {
             </p>
           </div>
 
-          <button
-            onClick={() => {
-              setEditingUser(null);
-              setFullName('');
-              setUsername('');
-              setEmail('');
-              setPassword('');
-              setRole('seller');
-              setFormError(null);
-              setShowCreateModal(true);
-            }}
-            className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md shadow-blue-600/20 transition flex items-center gap-2 self-start sm:self-auto"
-          >
-            <UserPlus className="w-4 h-4" />
-            Crear Nuevo Vendedor
-          </button>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            {!isFirebaseConnected ? (
+              <button
+                type="button"
+                onClick={handleConnectAdminFirebase}
+                disabled={connectingFirebase}
+                className="px-3.5 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-200 font-bold text-xs transition flex items-center gap-2"
+              >
+                <Cloud className="w-4 h-4 text-amber-300" />
+                {connectingFirebase ? 'Conectando...' : 'Conectar con Firebase (Google)'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={async () => {
+                  const synced = await syncLocalSellersToFirestore(adminUid, adminName);
+                  setActionFeedback({
+                    type: 'success',
+                    text:
+                      synced > 0
+                        ? `${synced} usuario(s) sincronizado(s) con Firebase Firestore.`
+                        : 'Todos los usuarios ya están sincronizados con Firebase Firestore.'
+                  });
+                  fetchUsers();
+                }}
+                className="px-3 py-2.5 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-700/70 text-emerald-300 font-bold text-xs transition flex items-center gap-1.5"
+                title="Sincronizar vendedores con la base de datos de Firebase"
+              >
+                <Cloud className="w-4 h-4 text-emerald-400" />
+                Firebase Conectado
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                setEditingUser(null);
+                setFullName('');
+                setUsername('');
+                setEmail('');
+                setPassword('');
+                setRole('seller');
+                setFormError(null);
+                setShowCreateModal(true);
+              }}
+              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md shadow-blue-600/20 transition flex items-center gap-2"
+            >
+              <UserPlus className="w-4 h-4" />
+              Crear Nuevo Vendedor
+            </button>
+          </div>
         </div>
 
         {/* Live Connection Summary */}
@@ -617,11 +729,28 @@ export const SellerManagement: React.FC = () => {
                             />
                           </div>
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <p className="font-bold text-white text-sm">{u.fullName}</p>
                               {isUserOnline && (
                                 <span className="text-[10px] font-bold text-emerald-400">
                                   En línea
+                                </span>
+                              )}
+                              {!isLocalPlaceholderUid(u.uid) ? (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] font-semibold text-sky-300 bg-sky-950/60 border border-sky-800/70 px-1.5 py-0.5 rounded"
+                                  title="Conectado a la base de datos de Firebase"
+                                >
+                                  <Cloud className="w-2.5 h-2.5" />
+                                  Firebase
+                                </span>
+                              ) : (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-400 bg-slate-800/80 border border-slate-700 px-1.5 py-0.5 rounded"
+                                  title="Sincronizar con Firebase al conectar Google"
+                                >
+                                  <CloudOff className="w-2.5 h-2.5" />
+                                  Local
                                 </span>
                               )}
                             </div>

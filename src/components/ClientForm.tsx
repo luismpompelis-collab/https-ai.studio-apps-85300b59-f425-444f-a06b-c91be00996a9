@@ -51,6 +51,7 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
 
   // Form Fields
   const [fullName, setFullName] = useState(initialClient?.fullName || '');
+  const [businessName, setBusinessName] = useState(initialClient?.businessName || '');
   const [cedula, setCedula] = useState(initialClient?.cedula || '');
   const [cedulaFront, setCedulaFront] = useState<string | null>(initialClient?.cedulaFront || null);
   const [cedulaBack, setCedulaBack] = useState<string | null>(initialClient?.cedulaBack || null);
@@ -86,6 +87,7 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
   const handleResetAndNext = () => {
     setRegisteredClientForShare(null);
     setFullName('');
+    setBusinessName('');
     setCedula('');
     setCedulaFront(null);
     setCedulaBack(null);
@@ -164,10 +166,14 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
       newErrors.phone = phoneVal.error || 'Teléfono dominicano inválido.';
     }
 
+    if (businessName.trim().length > 150) {
+      newErrors.businessName = 'La razón social no puede superar 150 caracteres.';
+    }
+
     if (secondaryPhone) {
       const secVal = validateDominicanPhone(secondaryPhone);
       if (!secVal.isValid) {
-        newErrors.secondaryPhone = secVal.error || 'Teléfono secundario inválido.';
+        newErrors.secondaryPhone = secVal.error || 'Número de teléfono secundario inválido.';
       }
     }
 
@@ -202,6 +208,7 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
     const clientRecord: ClientData = {
       clientId,
       fullName: fullName.trim(),
+      ...(businessName.trim() ? { businessName: businessName.trim() } : {}),
       cedula: cedula.trim(),
       cedulaFront: cedulaFront || null,
       cedulaBack: cedulaBack || null,
@@ -456,6 +463,7 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
             <input
               type="text"
               value={fullName}
+              maxLength={150}
               onChange={(e) => {
                 setFullName(e.target.value);
                 if (errors.fullName) setErrors((prev) => ({ ...prev, fullName: '' }));
@@ -466,6 +474,27 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
               }`}
             />
             {errors.fullName && <p className="text-xs text-red-400 mt-1">{errors.fullName}</p>}
+          </div>
+
+          {/* Razón Social o Nombre del Establecimiento */}
+          <div className="sm:col-span-2">
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1">
+              Razón Social o Nombre del Establecimiento
+            </label>
+            <input
+              type="text"
+              value={businessName}
+              maxLength={150}
+              onChange={(e) => {
+                setBusinessName(e.target.value);
+                if (errors.businessName) setErrors((prev) => ({ ...prev, businessName: '' }));
+              }}
+              placeholder="Ej: Colmado San Rafael, Distribuidora Los Prados SRL..."
+              className={`w-full bg-slate-900 border rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${
+                errors.businessName ? 'border-red-500' : 'border-slate-700'
+              }`}
+            />
+            {errors.businessName && <p className="text-xs text-red-400 mt-1">{errors.businessName}</p>}
           </div>
 
           {/* Cédula */}
@@ -519,15 +548,18 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
             {errors.phone && <p className="text-xs text-red-400 mt-1">{errors.phone}</p>}
           </div>
 
-          {/* Teléfono Secundario */}
+          {/* Número de Teléfono Secundario */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1">
-              Teléfono Secundario (Opcional)
+              Número de Teléfono Secundario
             </label>
             <input
               type="tel"
               value={secondaryPhone}
-              onChange={(e) => handlePhoneChange(e, true)}
+              onChange={(e) => {
+                handlePhoneChange(e, true);
+                if (errors.secondaryPhone) setErrors((prev) => ({ ...prev, secondaryPhone: '' }));
+              }}
               maxLength={14}
               placeholder="(829) 555-9876"
               className={`w-full bg-slate-900 border rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${
@@ -673,7 +705,15 @@ export const ClientForm: React.FC<ClientFormProps> = ({ initialClient, onSuccess
 
             <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-3.5 text-left text-xs space-y-1">
               <p className="font-bold text-white text-sm">{registeredClientForShare.fullName}</p>
+              {registeredClientForShare.businessName && (
+                <p className="text-blue-300 font-semibold">{registeredClientForShare.businessName}</p>
+              )}
               <p className="text-slate-400 font-mono">Cédula: {registeredClientForShare.cedula}</p>
+              {registeredClientForShare.secondaryPhone && (
+                <p className="text-slate-400 font-mono">
+                  Tel. Secundario: {formatDominicanPhone(registeredClientForShare.secondaryPhone)}
+                </p>
+              )}
               <p className="text-slate-400">Sector: {registeredClientForShare.sector}</p>
               <p className="text-blue-300 text-[11px] font-semibold">
                 Registrado por: {registeredClientForShare.sellerName}
